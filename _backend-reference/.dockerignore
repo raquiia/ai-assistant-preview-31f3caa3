@@ -1,0 +1,16 @@
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.github
+.vscode
+*.log
+coverage
+.env
+.env.*
+infra
+scripts
+DEPLOYMENT.md
+BACKEND_AWS_AUDIT.md
+README.md
