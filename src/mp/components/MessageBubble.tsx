@@ -1,20 +1,41 @@
 import type { Message } from "../shared";
-import { Bot, UserRound } from "lucide-react";
+import { Bot, User } from "lucide-react";
+import { motion } from "framer-motion";
 
 export function MessageBubble({ message }: { message: Message }) {
-  const assistant = message.role === "assistant";
+  const isAssistant = message.role === "assistant";
+
   return (
-    <div className={`flex ${assistant ? "justify-start" : "justify-end"}`}>
-      <div className={`max-w-full rounded-mp px-4 py-3 text-sm leading-6 shadow-sm sm:max-w-[84%] ${assistant ? "border border-slate-200 bg-white text-slate-800" : "bg-mp-navy text-white"}`}>
-        <div className={`mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide ${assistant ? "text-slate-400" : "text-cyan-100"}`}>
-          <span className="grid h-5 w-5 place-items-center rounded-full bg-white/10">
-            {assistant ? <Bot size={12} /> : <UserRound size={12} />}
-          </span>
-          <span>{assistant ? "Assistant" : "Vous"}</span>
-        </div>
-        <p className="mp-text-wrap whitespace-pre-line">{message.content}</p>
-        <p className={`mt-2 text-[11px] ${assistant ? "text-slate-400" : "text-blue-100"}`}>{new Date(message.createdAt).toLocaleTimeString()}</p>
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+      className={`group flex gap-3 ${isAssistant ? "" : "flex-row-reverse"}`}
+    >
+      <div
+        className={`grid size-8 shrink-0 place-items-center rounded-full text-xs font-semibold shadow-sm ${
+          isAssistant
+            ? "bg-gradient-to-br from-primary to-primary/70 text-primary-foreground ring-1 ring-primary/20"
+            : "bg-muted text-foreground ring-1 ring-border"
+        }`}
+      >
+        {isAssistant ? <Bot className="size-4" /> : <User className="size-4" />}
       </div>
-    </div>
+
+      <div className={`flex min-w-0 max-w-[calc(100%-3rem)] flex-col gap-1 ${isAssistant ? "items-start" : "items-end"}`}>
+        <div
+          className={`mp-text-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+            isAssistant
+              ? "rounded-tl-sm bg-muted/60 text-foreground"
+              : "rounded-tr-sm bg-primary text-primary-foreground shadow-soft"
+          }`}
+        >
+          <div className="whitespace-pre-line">{message.content}</div>
+        </div>
+        <span className="px-1 text-[10px] text-muted-foreground opacity-0 transition group-hover:opacity-100">
+          {new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+        </span>
+      </div>
+    </motion.div>
   );
 }

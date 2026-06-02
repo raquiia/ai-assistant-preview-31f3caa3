@@ -4,7 +4,7 @@ export function EmptyState({
   title,
   description,
   icon,
-  actions
+  actions,
 }: {
   title: string;
   description: string;
@@ -12,14 +12,18 @@ export function EmptyState({
   actions?: ReactNode;
 }) {
   return (
-    <div className="rounded-mp border border-dashed border-slate-300 bg-white p-6 text-slate-700 shadow-sm">
-      <div className="flex items-start gap-4">
-        {icon && <div className="grid h-10 w-10 shrink-0 place-items-center rounded-mp bg-slate-100 text-mp-blue">{icon}</div>}
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-slate-950">{title}</p>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">{description}</p>
-          {actions && <div className="mt-4 flex flex-wrap gap-2">{actions}</div>}
+    <div className="rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center">
+      <div className="mx-auto flex max-w-md flex-col items-center gap-3">
+        {icon && (
+          <div className="grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/15">
+            {icon}
+          </div>
+        )}
+        <div>
+          <p className="font-display text-base font-semibold text-foreground">{title}</p>
+          <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{description}</p>
         </div>
+        {actions && <div className="mt-2 flex flex-wrap justify-center gap-2">{actions}</div>}
       </div>
     </div>
   );
