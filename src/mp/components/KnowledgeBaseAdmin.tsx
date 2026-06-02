@@ -34,7 +34,13 @@ interface DocumentDetail {
 function statusVariant(status: string): "default" | "secondary" | "outline" {
   if (status === "PUBLISHED") return "default";
   if (status === "NEEDS_REVIEW") return "secondary";
+  if (status === "PROCESSING") return "outline";
   return "outline";
+}
+
+function statusLabel(status: string): string {
+  if (status === "PROCESSING") return "OCR…";
+  return status;
 }
 
 export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: Session }) {
@@ -524,8 +530,15 @@ function DocumentCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <p className="truncate text-sm font-medium text-foreground">{doc.title}</p>
-            <Badge variant={statusVariant(doc.status)} className="shrink-0 rounded-full text-[10px]">
-              {doc.status}
+            <Badge
+              variant={statusVariant(doc.status)}
+              className={cn(
+                "shrink-0 rounded-full text-[10px]",
+                doc.status === "PROCESSING" && "animate-pulse border-primary/50 text-primary"
+              )}
+              title={doc.status === "PROCESSING" ? "Extraction OCR Textract en cours" : undefined}
+            >
+              {statusLabel(doc.status)}
             </Badge>
           </div>
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{meta}</p>
