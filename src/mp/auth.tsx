@@ -37,7 +37,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ApiClient stable: lit toujours la dernière session via ref-like closure
   const api = useMemo(() => new ApiClient(() => session), [session]);
 
-  return (
   const logout = () => {
     void authProvider.signOut(session);
     setSession(null);
