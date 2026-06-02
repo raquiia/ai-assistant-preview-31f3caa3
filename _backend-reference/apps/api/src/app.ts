@@ -999,10 +999,11 @@ export async function buildApp() {
     }
   });
 
-
+  app.get("/superadmin/audit/events", { preHandler: auth(repo) }, async (request, reply) => {
     if (!canViewAudit(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     return { events: repo.state.auditEvents };
   });
+
 
   app.get("/superadmin/compliance/system-card", { preHandler: auth(repo) }, async (request, reply) => {
     if (!canViewAudit(request.actor!)) return reply.code(403).send({ error: "Access denied" });
