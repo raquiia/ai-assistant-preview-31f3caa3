@@ -608,6 +608,14 @@ function buildAnswer(
   return fresh;
 }
 
+/** Wave 6.D — exposé pour le streaming SSE côté ApiClient (mode mock). */
+export function buildAnswerForStream(
+  question: string,
+  filters?: { industryTags?: string[]; pmDomainTags?: string[] },
+): ChatAnswerPayload {
+  return buildAnswer(question, filters);
+}
+
 /** Expose cache hit-rate to dashboards (Wave 6.E). */
 export function getLlmCacheStats() {
   const total = cacheHits + cacheMisses;

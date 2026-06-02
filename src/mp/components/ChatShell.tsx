@@ -2,7 +2,7 @@ import {
   ArrowUp,
   ChevronRight,
   Database,
-  Loader2,
+  
   MessageSquarePlus,
   PanelRightOpen,
   Sparkles,
@@ -58,11 +58,16 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
   const [lastAnswer, setLastAnswer] = useState<ChatAnswerPayload | null>(null);
   const [sourceViewer, setSourceViewer] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  /** Wave 6.D — texte assistant en cours de stream (tokens accumulés). */
+  const [streamingText, setStreamingText] = useState("");
+  /** Wave 6.D — sources reçues avant la fin du stream (rail latéral live). */
+  const [streamingSources, setStreamingSources] = useState<SourceCitation[]>([]);
   const [showConversations, setShowConversations] = useState(false);
   const [showSources, setShowSources] = useState(false);
   const [filters, setFilters] = useState<ChatFilters>(() => loadFilters());
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     try { window.localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(filters)); } catch {}
@@ -75,7 +80,7 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
   }, [activeId]);
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages, lastAnswer]);
+  }, [messages, lastAnswer, streamingText]);
 
   async function refreshConversations() {
     try {
@@ -114,6 +119,10 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
     const trimmed = (textOverride ?? question).trim();
     if (!trimmed || loading) return;
     setLoading(true);
+    setStreamingText("");
+    setStreamingSources([]);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       let conversationId = activeId;
       if (!conversationId) {
@@ -138,19 +147,49 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
       };
       setMessages((prev) => [...prev, optimistic]);
 
-      const answer = await api.post<ChatAnswerPayload>(`/chat/conversations/${conversationId}/messages`, {
-        content: trimmed,
+      // Wave 6.D — stream SSE token par token.
+      let finalPayload: ChatAnswerPayload | null = null;
+      let acc = "";
+      for await (const evt of api.streamChat({
+        conversationId,
+        question: trimmed,
         industryTags: filters.industryTags,
         pmDomainTags: filters.pmDomainTags,
-      });
-      await loadConversation(conversationId);
-      setLastAnswer(answer);
-      await refreshConversations();
+        signal: controller.signal,
+      })) {
+        if (evt.type === "token") {
+          acc += evt.delta;
+          setStreamingText(acc);
+        } else if (evt.type === "sources") {
+          setStreamingSources(evt.sources);
+        } else if (evt.type === "done") {
+          finalPayload = evt.payload;
+        } else if (evt.type === "error") {
+          throw new Error(evt.message);
+        }
+      }
+
+      if (finalPayload) {
+        setLastAnswer(finalPayload);
+        await loadConversation(conversationId);
+        await refreshConversations();
+      }
     } catch (e) {
-      toast.error("La réponse a échoué", { description: e instanceof Error ? e.message : undefined });
+      if ((e as Error)?.name === "AbortError") {
+        toast.message("Génération interrompue");
+      } else {
+        toast.error("La réponse a échoué", { description: e instanceof Error ? e.message : undefined });
+      }
     } finally {
+      setStreamingText("");
+      setStreamingSources([]);
+      abortRef.current = null;
       setLoading(false);
     }
+  }
+
+  function stopStream() {
+    abortRef.current?.abort();
   }
 
   async function retryFallback() {
@@ -165,7 +204,8 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
   }
 
   const activeConv = useMemo(() => conversations.find((c) => c.id === activeId) ?? null, [activeId, conversations]);
-  const shownSources: SourceCitation[] = lastAnswer?.sources ?? [];
+  const shownSources: SourceCitation[] =
+    lastAnswer?.sources ?? (streamingSources.length ? streamingSources : []);
   const hasSources = shownSources.length > 0;
 
   return (
@@ -243,15 +283,24 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
                   </AnimatePresence>
 
                   {loading && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-3 px-1 text-sm text-muted-foreground">
-                      <div className="grid size-8 place-items-center rounded-full bg-gradient-to-br from-primary to-primary/70 text-primary-foreground">
-                        <Sparkles className="size-4 animate-pulse" />
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-start gap-3 px-1">
+                      <div className="grid size-8 shrink-0 place-items-center rounded-full bg-gradient-to-br from-primary to-primary/70 text-primary-foreground">
+                        <Sparkles className={`size-4 ${streamingText ? "" : "animate-pulse"}`} />
                       </div>
-                      <div className="flex gap-1">
-                        <span className="size-1.5 animate-bounce rounded-full bg-primary [animation-delay:-0.3s]" />
-                        <span className="size-1.5 animate-bounce rounded-full bg-primary [animation-delay:-0.15s]" />
-                        <span className="size-1.5 animate-bounce rounded-full bg-primary" />
-                      </div>
+                      {streamingText ? (
+                        // Wave 6.D — bulle assistant en cours de stream
+                        <div className="flex-1 whitespace-pre-wrap rounded-2xl bg-muted/40 px-4 py-3 text-sm leading-relaxed">
+                          {streamingText}
+                          <span className="ml-0.5 inline-block h-4 w-[2px] -mb-0.5 animate-pulse bg-primary align-middle" />
+                        </div>
+                      ) : (
+                        <div className="flex h-8 items-center gap-1 text-sm text-muted-foreground">
+                          <span className="size-1.5 animate-bounce rounded-full bg-primary [animation-delay:-0.3s]" />
+                          <span className="size-1.5 animate-bounce rounded-full bg-primary [animation-delay:-0.15s]" />
+                          <span className="size-1.5 animate-bounce rounded-full bg-primary" />
+                          <span className="ml-2 text-xs">Génération…</span>
+                        </div>
+                      )}
                     </motion.div>
                   )}
 
@@ -373,12 +422,14 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
                   <VoiceInput onTranscript={(t) => setQuestion((c) => `${c}${c ? " " : ""}${t}`)} />
                   <Button
                     size="icon"
-                    onClick={() => void send()}
-                    disabled={!question.trim() && !loading}
+                    onClick={() => (loading ? stopStream() : void send())}
+                    disabled={!loading && !question.trim()}
                     className="size-9 rounded-xl"
-                    aria-label={loading ? "Génération en cours" : "Envoyer"}
+                    variant={loading ? "destructive" : "default"}
+                    aria-label={loading ? "Arrêter la génération" : "Envoyer"}
+                    title={loading ? "Arrêter (Esc)" : "Envoyer (⏎)"}
                   >
-                    {loading ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
+                    {loading ? <Square className="size-3.5 fill-current" /> : <ArrowUp className="size-4" />}
                   </Button>
                 </div>
               </div>
