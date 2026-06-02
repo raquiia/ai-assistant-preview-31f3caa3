@@ -15,7 +15,7 @@ import {
   UserRound,
   Users,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { branding } from "./branding";
 import type { Role } from "./shared";
 import { ApiClient } from "./api";
