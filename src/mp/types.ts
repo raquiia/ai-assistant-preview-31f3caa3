@@ -78,9 +78,11 @@ export type ViewKey =
   | "users"
   | "kb"
   | "prompts"
+  | "providers"
   | "audit"
   | "embed"
   | "approvals";
+
 
 
 export interface FeedbackRequest {

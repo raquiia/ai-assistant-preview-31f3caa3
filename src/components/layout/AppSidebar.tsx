@@ -50,6 +50,8 @@ const NAV: NavItem[] = [
   { key: "approvals", label: "Approbations", icon: UserCheck, roles: ["MANAGER", "SUPER_ADMIN"], group: "admin", badgeKey: "approvals" },
   { key: "users", label: "Utilisateurs", icon: Users, roles: ["SUPER_ADMIN"], group: "admin" },
   { key: "prompts", label: "Prompts & modèles", icon: KeyRound, roles: ["SUPER_ADMIN"], group: "admin" },
+  { key: "providers", label: "Clés API IA", icon: KeyRound, roles: ["SUPER_ADMIN"], group: "admin" },
+
   { key: "audit", label: "Audit", icon: ShieldCheck, roles: ["SUPER_ADMIN", "AUDITOR"], group: "admin" },
   { key: "embed", label: "Embed", icon: ClipboardCheck, roles: ["SUPER_ADMIN"], group: "admin" },
 ];

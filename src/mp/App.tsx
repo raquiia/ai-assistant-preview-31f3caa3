@@ -11,10 +11,12 @@ import { LoginPage } from "./components/LoginPage";
 import { ManagerAdminHistory } from "./components/ManagerAdminHistory";
 import { PendingApprovalScreen } from "./components/PendingApprovalScreen";
 import { PromptAndModelSettings } from "./components/PromptAndModelSettings";
+import { AiProvidersAdmin } from "./components/AiProvidersAdmin";
 import { SuperAdminDashboard } from "./components/SuperAdminDashboard";
 import { UsageDashboard } from "./components/UsageDashboard";
 import { ModelSelector } from "./components/ModelSelector";
 import { UserManagement } from "./components/UserManagement";
+
 import type { Role } from "./shared";
 import type { ViewKey } from "./types";
 
@@ -107,6 +109,14 @@ function MpAppInner() {
       content: <PromptAndModelSettings api={api} />,
     },
     {
+      key: "providers",
+      title: "Clés API IA",
+      subtitle: "Mistral, OpenAI, Tavily, SerpAPI — stockées dans AWS Secrets Manager",
+      roles: ["SUPER_ADMIN"],
+      content: <AiProvidersAdmin api={api} />,
+    },
+    {
+
       key: "audit",
       title: "Audit",
       subtitle: "Traçabilité complète des actions",
