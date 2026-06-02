@@ -278,6 +278,244 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
   );
 }
 
+function DocumentList({
+  documents,
+  selectedId,
+  search,
+  setSearch,
+  statusFilter,
+  setStatusFilter,
+  filterInd,
+  setFilterInd,
+  filterDom,
+  setFilterDom,
+  onInspect,
+  canEdit,
+  onUpdateTags,
+}: {
+  documents: DocumentRecord[];
+  selectedId?: string;
+  search: string;
+  setSearch: (v: string) => void;
+  statusFilter: string;
+  setStatusFilter: (v: string) => void;
+  filterInd: string[];
+  setFilterInd: (v: string[]) => void;
+  filterDom: string[];
+  setFilterDom: (v: string[]) => void;
+  onInspect: (id: string) => void;
+  canEdit: boolean;
+  onUpdateTags: (id: string, ind: string[], dom: string[]) => Promise<void>;
+}) {
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return documents.filter((d) => {
+      if (q && !d.title.toLowerCase().includes(q)) return false;
+      if (statusFilter !== "ALL" && d.status !== statusFilter) return false;
+      if (filterInd.length && !filterInd.some((t) => (d.industryTags ?? []).includes(t))) return false;
+      if (filterDom.length && !filterDom.some((t) => (d.pmDomainTags ?? []).includes(t))) return false;
+      return true;
+    });
+  }, [documents, search, statusFilter, filterInd, filterDom]);
+
+  const activeFilters = filterInd.length + filterDom.length;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[180px] flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Rechercher un document…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-9 pl-8 text-sm"
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="h-9 w-[150px] text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">Tous statuts</SelectItem>
+            <SelectItem value="NEEDS_REVIEW">À revoir</SelectItem>
+            <SelectItem value="PUBLISHED">Publiés</SelectItem>
+            <SelectItem value="PROCESSING">En cours</SelectItem>
+            <SelectItem value="ARCHIVED">Archivés</SelectItem>
+          </SelectContent>
+        </Select>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm" className="h-9 gap-1.5">
+              <Filter className="size-3.5" />
+              Tags
+              {activeFilters > 0 && (
+                <Badge variant="secondary" className="ml-1 h-4 rounded-full px-1.5 text-[10px]">
+                  {activeFilters}
+                </Badge>
+              )}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-80 p-0" align="end">
+            <div className="flex items-center justify-between border-b px-3 py-2">
+              <p className="text-xs font-semibold">Filtrer par tags</p>
+              {activeFilters > 0 && (
+                <button
+                  onClick={() => {
+                    setFilterInd([]);
+                    setFilterDom([]);
+                  }}
+                  className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+                >
+                  <X className="size-3" /> Réinitialiser
+                </button>
+              )}
+            </div>
+            <ScrollArea className="max-h-80">
+              <div className="space-y-3 p-3">
+                <div>
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Secteurs
+                  </p>
+                  <div className="grid grid-cols-2 gap-1">
+                    {INDUSTRIES.map((opt) => (
+                      <label
+                        key={opt.value}
+                        className="flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 text-[11px] hover:bg-muted/60"
+                      >
+                        <Checkbox
+                          checked={filterInd.includes(opt.value)}
+                          onCheckedChange={() =>
+                            setFilterInd(
+                              filterInd.includes(opt.value)
+                                ? filterInd.filter((v) => v !== opt.value)
+                                : [...filterInd, opt.value],
+                            )
+                          }
+                          className="size-3.5"
+                        />
+                        <span className="truncate">{labelForIndustry(opt.value)}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Domaines PM
+                  </p>
+                  <div className="grid grid-cols-2 gap-1">
+                    {PM_DOMAINS.map((opt) => (
+                      <label
+                        key={opt.value}
+                        className="flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 text-[11px] hover:bg-muted/60"
+                      >
+                        <Checkbox
+                          checked={filterDom.includes(opt.value)}
+                          onCheckedChange={() =>
+                            setFilterDom(
+                              filterDom.includes(opt.value)
+                                ? filterDom.filter((v) => v !== opt.value)
+                                : [...filterDom, opt.value],
+                            )
+                          }
+                          className="size-3.5"
+                        />
+                        <span className="truncate">{labelForPmDomain(opt.value)}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </ScrollArea>
+          </PopoverContent>
+        </Popover>
+        <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+          {filtered.length} / {documents.length}
+        </span>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center text-sm text-muted-foreground">
+          Aucun document ne correspond aux filtres.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((doc) => (
+            <DocumentCard
+              key={doc.id}
+              doc={doc}
+              selected={doc.id === selectedId}
+              onClick={() => onInspect(doc.id)}
+              canEdit={canEdit}
+              onUpdateTags={(ind, dom) => onUpdateTags(doc.id, ind, dom)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DocumentCard({
+  doc,
+  selected,
+  onClick,
+  canEdit,
+  onUpdateTags,
+}: {
+  doc: DocumentRecord;
+  selected: boolean;
+  onClick: () => void;
+  canEdit: boolean;
+  onUpdateTags: (ind: string[], dom: string[]) => Promise<void>;
+}) {
+  const meta = [doc.mimeType, `v${doc.version}`, doc.language?.toUpperCase(), new Date(doc.createdAt).toLocaleDateString()]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "group block w-full rounded-xl border bg-card p-3.5 text-left transition-all hover:border-primary/40 hover:shadow-soft",
+        selected ? "border-primary/60 ring-1 ring-primary/30 shadow-soft" : "border-border/60",
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+          <FileText size={15} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <p className="truncate text-sm font-medium text-foreground">{doc.title}</p>
+            <Badge variant={statusVariant(doc.status)} className="shrink-0 rounded-full text-[10px]">
+              {doc.status}
+            </Badge>
+          </div>
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{meta}</p>
+          <div className="mt-2 flex items-end justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <TagList
+                industryTags={doc.industryTags ?? []}
+                pmDomainTags={doc.pmDomainTags ?? []}
+              />
+            </div>
+            {canEdit && (
+              <span onClick={(e) => e.stopPropagation()} className="shrink-0">
+                <TagEditor
+                  industryTags={doc.industryTags ?? []}
+                  pmDomainTags={doc.pmDomainTags ?? []}
+                  onSave={onUpdateTags}
+                />
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </button>
+  );
+}
+
 function TagList({
   industryTags,
   pmDomainTags,
