@@ -76,6 +76,13 @@ function MpAppInner() {
       content: <KnowledgeBaseAdmin api={api} session={session} />,
     },
     {
+      key: "approvals",
+      title: "Approbations",
+      subtitle: "Valider les nouveaux consultants rattachés à votre périmètre",
+      roles: ["MANAGER", "SUPER_ADMIN"],
+      content: <ConsultantApprovals api={api} />,
+    },
+    {
       key: "users",
       title: "Utilisateurs",
       subtitle: "Rôles, statut, départements",
