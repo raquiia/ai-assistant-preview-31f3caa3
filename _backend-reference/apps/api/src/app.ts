@@ -21,6 +21,11 @@ import { EnvEncryptedSecretProvider } from "./security/secretProvider.js";
 import { signToken, verifyToken } from "./security/tokens.js";
 import { hashPassword, verifyDemoPassword } from "./security/passwords.js";
 import { ChatService } from "./services/chatService.js";
+import { bootstrapProviders } from "./bootstrap.js";
+import { AiProviderService, type AiProviderName } from "./services/aiProviderService.js";
+import { jitProvisionUser, type JitRepo } from "./services/jitProvisioning.js";
+import { CognitoAdminProvider } from "./providers/aws/cognito-admin.js";
+import { CognitoAuthProvider, type AppRole } from "./providers/aws/cognito-auth.js";
 
 declare module "fastify" {
   interface FastifyRequest {
