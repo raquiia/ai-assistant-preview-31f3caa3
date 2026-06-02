@@ -24,7 +24,25 @@ import { MessageBubble } from "./MessageBubble";
 import { SourceCards } from "./SourceCards";
 import { SourceViewer } from "./SourceViewer";
 import { VoiceInput } from "./VoiceInput";
+import { ChatFiltersBar } from "./ChatFilters";
+import { labelForIndustry, labelForPmDomain, type ChatFilters } from "../shared";
 import { toast } from "sonner";
+
+const FILTERS_STORAGE_KEY = "mp.chat.filters.v1";
+function loadFilters(): ChatFilters {
+  if (typeof window === "undefined") return { industryTags: [], pmDomainTags: [] };
+  try {
+    const raw = window.localStorage.getItem(FILTERS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<ChatFilters>;
+      return {
+        industryTags: Array.isArray(parsed.industryTags) ? parsed.industryTags : [],
+        pmDomainTags: Array.isArray(parsed.pmDomainTags) ? parsed.pmDomainTags : [],
+      };
+    }
+  } catch {}
+  return { industryTags: [], pmDomainTags: [] };
+}
 
 const SUGGESTIONS = [
   { icon: Sparkles, label: "Construire un planning multi-projet", prompt: "Comment structurer un planning multi-projet avec dépendances inter-équipes ?" },
