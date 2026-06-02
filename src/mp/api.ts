@@ -8,9 +8,18 @@
 import { handleMock, buildAnswerForStream } from "./mocks";
 import type { Session, ChatAnswerPayload } from "./types";
 import type { SourceCitation } from "./shared";
+import { captureApiError, newTraceId } from "@/lib/observability";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 const USE_MOCKS = (import.meta.env.VITE_USE_MOCKS ?? "true") !== "false";
+
+/** Wave 6.F — erreur API enrichie d'un traceId pour corrélation backend/Sentry. */
+export class ApiError extends Error {
+  constructor(message: string, public readonly traceId: string, public readonly status?: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
 /** Wave 6.D — événements SSE émis par /chat/.../messages/stream. */
 export type StreamEvent =
