@@ -1,6 +1,7 @@
 import { FileText, RefreshCcw, ShieldCheck, UploadCloud } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { DocumentRecord } from "../shared";
+import { labelForIndustry, labelForPmDomain } from "../shared";
 import type { ApiClient } from "../api";
 import type { Session } from "../types";
 import { AdminLayout } from "./AdminLayout";
