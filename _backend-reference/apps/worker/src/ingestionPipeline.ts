@@ -198,7 +198,7 @@ async function extractSync(job: IngestionJob, deps: IngestionDeps): Promise<Sync
     if (!deps.textract || !deps.storage) return { text: "" };
     const bucket = process.env.S3_KNOWLEDGE_BUCKET!;
     const { jobId } = await deps.textract.startJob(bucket, job.objectKey, job.documentId);
-    return { async: true, externalJobId: jobId };
+    return { async: true, externalJobId: jobId, engine: "textract" };
   }
 
   // Audio/Video → Transcribe
@@ -212,7 +212,7 @@ async function extractSync(job: IngestionJob, deps: IngestionDeps): Promise<Sync
       jobName,
       mediaFormat: inferMediaFormat(job.mimeType),
     });
-    return { async: true, externalJobId: jobName };
+    return { async: true, externalJobId: jobName, engine: "transcribe" };
   }
 
   return { text: "" };
