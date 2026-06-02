@@ -878,6 +878,16 @@ export async function buildApp() {
   return app;
 }
 
+// Routes that a PENDING_MANAGER user is still allowed to call (read-only,
+// session bootstrap + waiting-room workflow).
+const PENDING_MANAGER_ALLOWED = new Set<string>([
+  "/auth/me",
+  "/auth/logout",
+  "/auth/refresh",
+  "/managers/active",
+  "/notifications/pending-count"
+]);
+
 function auth(repo: AppRepository) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     try {
@@ -886,6 +896,9 @@ function auth(repo: AppRepository) {
       const payload = verifyToken(token, "access");
       const actor = repo.findUserById(payload.sub);
       if (!actor || actor.status === "DISABLED") throw new Error("Invalid user");
+      if (actor.status === "PENDING_MANAGER" && !PENDING_MANAGER_ALLOWED.has(request.routeOptions?.url ?? request.url)) {
+        return reply.code(403).send({ error: "Account pending manager approval" });
+      }
       request.actor = actor;
     } catch {
       return reply.code(401).send({ error: "Unauthorized" });
