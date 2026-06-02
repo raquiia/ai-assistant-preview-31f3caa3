@@ -283,15 +283,24 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
                   </AnimatePresence>
 
                   {loading && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-3 px-1 text-sm text-muted-foreground">
-                      <div className="grid size-8 place-items-center rounded-full bg-gradient-to-br from-primary to-primary/70 text-primary-foreground">
-                        <Sparkles className="size-4 animate-pulse" />
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-start gap-3 px-1">
+                      <div className="grid size-8 shrink-0 place-items-center rounded-full bg-gradient-to-br from-primary to-primary/70 text-primary-foreground">
+                        <Sparkles className={`size-4 ${streamingText ? "" : "animate-pulse"}`} />
                       </div>
-                      <div className="flex gap-1">
-                        <span className="size-1.5 animate-bounce rounded-full bg-primary [animation-delay:-0.3s]" />
-                        <span className="size-1.5 animate-bounce rounded-full bg-primary [animation-delay:-0.15s]" />
-                        <span className="size-1.5 animate-bounce rounded-full bg-primary" />
-                      </div>
+                      {streamingText ? (
+                        // Wave 6.D — bulle assistant en cours de stream
+                        <div className="flex-1 whitespace-pre-wrap rounded-2xl bg-muted/40 px-4 py-3 text-sm leading-relaxed">
+                          {streamingText}
+                          <span className="ml-0.5 inline-block h-4 w-[2px] -mb-0.5 animate-pulse bg-primary align-middle" />
+                        </div>
+                      ) : (
+                        <div className="flex h-8 items-center gap-1 text-sm text-muted-foreground">
+                          <span className="size-1.5 animate-bounce rounded-full bg-primary [animation-delay:-0.3s]" />
+                          <span className="size-1.5 animate-bounce rounded-full bg-primary [animation-delay:-0.15s]" />
+                          <span className="size-1.5 animate-bounce rounded-full bg-primary" />
+                          <span className="ml-2 text-xs">Génération…</span>
+                        </div>
+                      )}
                     </motion.div>
                   )}
 
