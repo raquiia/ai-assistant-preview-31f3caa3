@@ -19,7 +19,12 @@ locals {
     Environment = var.environment
     ManagedBy   = "terraform"
   }
+  ai_providers = ["mistral", "openai", "tavily", "serpapi"]
 }
+
+# ---------------------------------------------------------------------------
+# KMS
+# ---------------------------------------------------------------------------
 
 resource "aws_kms_key" "secrets" {
   description             = "KMS key for MIGSO-PCUBED AI Assistant secrets and data encryption"
@@ -27,6 +32,15 @@ resource "aws_kms_key" "secrets" {
   enable_key_rotation     = true
   tags                    = local.tags
 }
+
+resource "aws_kms_alias" "secrets" {
+  name          = "alias/${local.name}-secrets"
+  target_key_id = aws_kms_key.secrets.key_id
+}
+
+# ---------------------------------------------------------------------------
+# S3 - Knowledge base bucket (PDF/DOCX/media uploads)
+# ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "knowledge" {
   bucket = "${local.name}-knowledge"
@@ -40,16 +54,122 @@ resource "aws_s3_bucket_versioning" "knowledge" {
   }
 }
 
-resource "aws_sqs_queue" "ingestion" {
-  name                       = "${local.name}-ingestion"
-  visibility_timeout_seconds = 900
+resource "aws_s3_bucket_public_access_block" "knowledge" {
+  bucket                  = aws_s3_bucket.knowledge.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "knowledge" {
+  bucket = aws_s3_bucket.knowledge.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.secrets.arn
+    }
+    bucket_key_enabled = true
+  }
+}
+
+resource "aws_s3_bucket_cors_configuration" "knowledge" {
+  bucket = aws_s3_bucket.knowledge.id
+
+  # Presigned PUT for KB document upload from the admin UI.
+  cors_rule {
+    allowed_methods = ["GET", "PUT", "HEAD"]
+    allowed_origins = var.web_allowed_origins
+    allowed_headers = ["*"]
+    expose_headers  = ["ETag"]
+    max_age_seconds = 3000
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "knowledge" {
+  bucket = aws_s3_bucket.knowledge.id
+
+  rule {
+    id     = "expire-noncurrent-versions"
+    status = "Enabled"
+    noncurrent_version_expiration {
+      noncurrent_days = 90
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
+# ---------------------------------------------------------------------------
+# SQS - Ingestion queue + DLQ + age alarm
+# ---------------------------------------------------------------------------
+
+resource "aws_sqs_queue" "ingestion_dlq" {
+  name                       = "${local.name}-ingestion-dlq"
   message_retention_seconds  = 1209600
   kms_master_key_id          = aws_kms_key.secrets.arn
   tags                       = local.tags
 }
 
+resource "aws_sqs_queue" "ingestion" {
+  name                       = "${local.name}-ingestion"
+  visibility_timeout_seconds = 900
+  message_retention_seconds  = 1209600
+  kms_master_key_id          = aws_kms_key.secrets.arn
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.ingestion_dlq.arn
+    maxReceiveCount     = 5
+  })
+  tags = local.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "ingestion_age" {
+  alarm_name          = "${local.name}-ingestion-age"
+  alarm_description   = "Oldest ingestion message exceeded SLA — worker may be stuck."
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateAgeOfOldestMessage"
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 5
+  threshold           = 600
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  dimensions = {
+    QueueName = aws_sqs_queue.ingestion.name
+  }
+  tags = local.tags
+}
+
+# ---------------------------------------------------------------------------
+# Cognito - Users + RBAC groups
+# ---------------------------------------------------------------------------
+
 resource "aws_cognito_user_pool" "main" {
-  name = "${local.name}-users"
+  name                     = "${local.name}-users"
+  mfa_configuration        = "OPTIONAL"
+  auto_verified_attributes = ["email"]
+
+  password_policy {
+    minimum_length                   = 12
+    require_lowercase                = true
+    require_numbers                  = true
+    require_symbols                  = true
+    require_uppercase                = true
+    temporary_password_validity_days = 3
+  }
+
+  software_token_mfa_configuration {
+    enabled = true
+  }
+
+  account_recovery_setting {
+    recovery_mechanism {
+      name     = "verified_email"
+      priority = 1
+    }
+  }
+
   tags = local.tags
 }
 
@@ -59,11 +179,48 @@ resource "aws_cognito_user_group" "roles" {
   user_pool_id = aws_cognito_user_pool.main.id
 }
 
+resource "aws_cognito_user_pool_client" "web" {
+  name                                 = "${local.name}-web"
+  user_pool_id                         = aws_cognito_user_pool.main.id
+  generate_secret                      = false
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_scopes                 = ["email", "openid", "profile"]
+  callback_urls                        = var.web_callback_urls
+  logout_urls                          = var.web_logout_urls
+  supported_identity_providers         = ["COGNITO"]
+  prevent_user_existence_errors        = "ENABLED"
+  explicit_auth_flows = [
+    "ALLOW_USER_SRP_AUTH",
+    "ALLOW_REFRESH_TOKEN_AUTH",
+  ]
+}
+
+# ---------------------------------------------------------------------------
+# Secrets Manager - One secret per AI / search provider
+# ---------------------------------------------------------------------------
+
 resource "aws_secretsmanager_secret" "ai_provider_keys" {
-  name       = "${local.name}/ai-provider-keys"
+  for_each   = toset(local.ai_providers)
+  name       = "${local.name}/ai-providers/${each.key}"
   kms_key_id = aws_kms_key.secrets.arn
   tags       = local.tags
 }
+
+# Bootstrap empty placeholder versions so the app can read the secret even
+# before an operator rotates it manually. Replace with real rotation lambda.
+resource "aws_secretsmanager_secret_version" "ai_provider_keys_placeholder" {
+  for_each      = aws_secretsmanager_secret.ai_provider_keys
+  secret_id     = each.value.id
+  secret_string = jsonencode({ apiKey = "REPLACE_ME" })
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+# ---------------------------------------------------------------------------
+# CloudWatch - Log groups for ECS services
+# ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_group" "api" {
   name              = "/ecs/${local.name}/api"
@@ -79,7 +236,61 @@ resource "aws_cloudwatch_log_group" "worker" {
   tags              = local.tags
 }
 
-# Placeholders for VPC, ECS Fargate, RDS PostgreSQL and OpenSearch Serverless.
-# In a real environment, add private subnets, least-privilege task roles,
-# security groups, RDS subnet groups, AOSS encryption/network/access policies,
-# and CloudWatch alarms/dashboards.
+# ---------------------------------------------------------------------------
+# Placeholders — declared structurally so the diff with target architecture
+# is visible, but commented out until network and DNS decisions are made.
+#
+# When ready:
+#   1. Provision a VPC module (private + public subnets, NAT, VPC endpoints
+#      for S3, Secrets Manager, KMS, ECR, CloudWatch, AOSS).
+#   2. Uncomment and wire the resources below to that VPC.
+#   3. Add IAM task roles per service with least-privilege policies scoped
+#      to the specific bucket, queue, secrets, AOSS collection and KMS key.
+#   4. Add CloudFront distributions for `apps/web` and `/embed/*`, with a
+#      WAF web ACL and `Content-Security-Policy: frame-ancestors` honoring
+#      the embed origin allowlist.
+#   5. Add Secrets Manager rotation lambdas for the AI provider keys.
+# ---------------------------------------------------------------------------
+
+# resource "aws_db_instance" "postgres" {
+#   identifier              = "${local.name}-postgres"
+#   engine                  = "postgres"
+#   engine_version          = "16"
+#   instance_class          = "db.t4g.medium"
+#   allocated_storage       = 50
+#   storage_encrypted       = true
+#   kms_key_id              = aws_kms_key.secrets.arn
+#   db_subnet_group_name    = aws_db_subnet_group.main.name
+#   vpc_security_group_ids  = [aws_security_group.rds.id]
+#   backup_retention_period = 14
+#   deletion_protection     = true
+#   tags                    = local.tags
+# }
+
+# resource "aws_opensearchserverless_collection" "vectors" {
+#   name = "${local.name}-vectors"
+#   type = "VECTORSEARCH"
+#   tags = local.tags
+#   # Requires encryption, network and data access policies declared first.
+# }
+
+# resource "aws_ecs_cluster" "main" {
+#   name = local.name
+#   setting {
+#     name  = "containerInsights"
+#     value = "enabled"
+#   }
+#   tags = local.tags
+# }
+
+# resource "aws_cloudfront_distribution" "web" {
+#   # Origin: S3 static bucket for apps/web
+#   # Behaviors: SPA fallback to /index.html
+#   # WAF: aws_wafv2_web_acl
+#   # Response headers policy: strict CSP, HSTS, frame-ancestors per env
+# }
+
+# resource "aws_cloudfront_distribution" "embed" {
+#   # Origin: ALB serving /embed/* from apps/api
+#   # Strict CSP with frame-ancestors limited to embed allowlist
+# }
