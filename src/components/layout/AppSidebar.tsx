@@ -45,6 +45,7 @@ const NAV: NavItem[] = [
   { key: "chat", label: "Chat", icon: MessageSquareText, roles: ["CONSULTANT", "MANAGER", "SUPER_ADMIN"], group: "work" },
   { key: "history", label: "Historique", icon: History, roles: ["MANAGER", "SUPER_ADMIN", "AUDITOR"], group: "work" },
   { key: "dashboard", label: "Dashboard", icon: Gauge, roles: ["MANAGER", "SUPER_ADMIN", "AUDITOR"], group: "work" },
+  { key: "usage", label: "Budget & coûts", icon: Bot, roles: ["CONSULTANT", "MANAGER", "SUPER_ADMIN", "AUDITOR"], group: "work" },
   { key: "kb", label: "Knowledge Base", icon: Database, roles: ["MANAGER", "SUPER_ADMIN", "AUDITOR"], group: "work" },
   { key: "approvals", label: "Approbations", icon: UserCheck, roles: ["MANAGER", "SUPER_ADMIN"], group: "admin", badgeKey: "approvals" },
   { key: "users", label: "Utilisateurs", icon: Users, roles: ["SUPER_ADMIN"], group: "admin" },

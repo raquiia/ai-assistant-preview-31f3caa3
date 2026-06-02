@@ -2,6 +2,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { ThemeToggle } from "./ThemeToggle";
 import { Separator } from "@/components/ui/separator";
 import { motion } from "framer-motion";
+import { BudgetGauge } from "@/mp/components/BudgetGauge";
 
 export function AppHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: React.ReactNode }) {
   return (
@@ -18,8 +19,9 @@ export function AppHeader({ title, subtitle, actions }: { title: string; subtitl
         <h1 className="truncate font-display text-base font-semibold leading-tight tracking-tight">{title}</h1>
         {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
       </motion.div>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-2">
         {actions}
+        <BudgetGauge />
         <ThemeToggle />
       </div>
     </header>
