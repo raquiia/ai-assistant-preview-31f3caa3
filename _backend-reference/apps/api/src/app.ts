@@ -8,7 +8,6 @@ import {
   canEditPrompts,
   canManageUsers,
   canViewAudit,
-  canViewAudit,
   canViewConversation,
   detectLanguage,
   type FeedbackRating,
