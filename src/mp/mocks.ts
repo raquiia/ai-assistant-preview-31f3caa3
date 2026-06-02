@@ -244,6 +244,50 @@ const auditEvents: AuditEvent[] = [
   },
 ];
 
+// Feedback consultants + commentaires admin persistent entre les appels.
+const historyFeedback: Record<
+  string,
+  Array<{ id: string; userId: string; userName: string; rating: string; comment?: string | null; createdAt: string }>
+> = {
+  "r-1": [
+    {
+      id: "fb-1",
+      userId: "u-consult",
+      userName: "Clara Consultante",
+      rating: "UP",
+      comment: "Réponse claire et structurée, j'ai pu la réutiliser telle quelle.",
+      createdAt: new Date().toISOString(),
+    },
+  ],
+  "r-2": [
+    {
+      id: "fb-2",
+      userId: "u-consult",
+      userName: "Clara Consultante",
+      rating: "DOWN",
+      comment: "Manque d'exemple concret sur un projet réel.",
+      createdAt: new Date().toISOString(),
+    },
+  ],
+  "r-3": [
+    {
+      id: "fb-3",
+      userId: "u-consult-2",
+      userName: "Lucas Consultant",
+      rating: "THREE",
+      comment: "Formule correcte mais aurait pu citer la source PMBOK.",
+      createdAt: new Date().toISOString(),
+    },
+  ],
+};
+
+const historyAdminComments: Record<
+  string,
+  Array<{ id: string; adminId: string; adminName: string; comment: string; status: string; createdAt: string }>
+> = {};
+
+
+
 function sessionFor(email: string): Session | null {
   const user = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
   if (!user) return null;
@@ -414,15 +458,19 @@ export function handleMock<T>(
   }
 
 
-  // HISTORY
-  if (method === "GET" && path.startsWith("/admin/history")) {
-    const rows: HistoryRow[] = (messagesByConv["c-1"] ?? []).slice(0, 1).map(() => ({
+  // HISTORY — scope par rôle :
+  //  - SUPER_ADMIN / AUDITOR : voit tout
+  //  - MANAGER : voit uniquement les Q/R de ses consultants
+  //  - CONSULTANT : non autorisé (renvoie vide)
+  const allHistoryRows: HistoryRow[] = [
+    {
       responseId: "r-1",
       conversationId: "c-1",
       userName: "Clara Consultante",
       managerId: "u-mgr",
-      question: "Comment construire un WBS pour un programme avionique ?",
-      answer: "Un WBS robuste s'articule en 4 niveaux…",
+      question: "Comment construire un WBS pour un programme avionique de 18 mois ?",
+      answer:
+        "Un WBS robuste s'articule en 4 niveaux : objectifs programme, livrables systèmes, lots de travaux, tâches.",
       language: "fr",
       model: "mistral-large-latest",
       provider: "mistral",
@@ -431,9 +479,98 @@ export function handleMock<T>(
       escalationTriggered: false,
       latencyMs: 420,
       createdAt: now(),
-    }));
+    },
+    {
+      responseId: "r-2",
+      conversationId: "c-2",
+      userName: "Clara Consultante",
+      managerId: "u-mgr",
+      question: "Quel modèle RACI utiliser pour une gouvernance projet à 5 parties prenantes ?",
+      answer:
+        "Le RACI doit identifier R (Responsible), A (Accountable), C (Consulted), I (Informed) pour chaque livrable clé.",
+      language: "fr",
+      model: "mistral-large-latest",
+      provider: "mistral",
+      confidence: 0.82,
+      fallbackUsed: false,
+      escalationTriggered: false,
+      latencyMs: 510,
+      createdAt: now(),
+    },
+    {
+      responseId: "r-3",
+      conversationId: "c-3",
+      userName: "Lucas Consultant",
+      managerId: "u-mgr-2",
+      question: "Comment estimer la charge d'un lot de travaux en méthode PERT ?",
+      answer:
+        "La méthode PERT utilise (O + 4M + P) / 6 où O = optimiste, M = plus probable, P = pessimiste.",
+      language: "fr",
+      model: "gpt-4o-mini",
+      provider: "openai",
+      confidence: 0.65,
+      fallbackUsed: true,
+      escalationTriggered: false,
+      latencyMs: 680,
+      createdAt: now(),
+    },
+  ];
+
+
+
+
+  if (method === "GET" && path === "/admin/history") {
+    const role = session?.user.role;
+    let rows = allHistoryRows;
+    if (role === "MANAGER") {
+      rows = allHistoryRows.filter((r) => r.managerId === session?.user.id);
+    } else if (role === "CONSULTANT") {
+      rows = [];
+    }
     return { rows } as T;
   }
+
+  m = match(path, "/admin/history/:id");
+  if (method === "GET" && m) {
+    const row = allHistoryRows.find((r) => r.responseId === m!.id);
+    if (!row) throw new Error("Réponse introuvable");
+    return {
+      ...row,
+      feedback: historyFeedback[row.responseId] ?? [],
+      adminComments: historyAdminComments[row.responseId] ?? [],
+      sources: mockSources().map((s) => ({
+        chunk: { title: s.title, section: s.section, page: s.page, text: s.excerpt },
+        score: Math.round(s.score * 100),
+      })),
+    } as T;
+  }
+
+  m = match(path, "/admin/history/:id/comment");
+  if (method === "POST" && m) {
+    const payload = (body as { comment?: string; status?: string }) ?? {};
+    const list = (historyAdminComments[m.id] ??= []);
+    const entry = {
+      id: id("ac"),
+      adminId: session?.user.id ?? "u-super",
+      adminName: session?.user.name ?? "Super admin",
+      comment: payload.comment ?? "",
+      status: payload.status ?? "DRAFT",
+      createdAt: now(),
+    };
+    list.push(entry);
+    return { comment: entry } as T;
+  }
+
+  m = match(path, "/admin/history/:id/translate");
+  if (method === "POST" && m) {
+    const row = allHistoryRows.find((r) => r.responseId === m!.id);
+    const lang = (body as { language?: string })?.language ?? "en";
+    return {
+      question: `[${lang.toUpperCase()}] ${row?.question ?? ""}`,
+      answer: `[${lang.toUpperCase()}] ${row?.answer ?? ""}`,
+    } as T;
+  }
+
 
   // DASHBOARD
   if (method === "GET" && path.startsWith("/admin/dashboard")) {
