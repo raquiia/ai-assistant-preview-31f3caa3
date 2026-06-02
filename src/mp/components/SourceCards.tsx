@@ -1,5 +1,5 @@
 import { ChevronRight, FileText } from "lucide-react";
-import type { SourceCitation } from "../shared";
+import { labelForIndustry, labelForPmDomain, type SourceCitation } from "../shared";
 
 function relevanceTone(score: number): { bar: string; text: string; bg: string } {
   if (score >= 80) return { bar: "bg-success", text: "text-success", bg: "bg-success/10" };
