@@ -86,6 +86,13 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
     toast.success("Réindexation lancée");
   }
 
+  async function updateTags(documentId: string, industryTags: string[], pmDomainTags: string[]) {
+    if (session.user.role !== "SUPER_ADMIN") return;
+    await api.patch(`/admin/kb/documents/${documentId}`, { industryTags, pmDomainTags });
+    toast.success("Tags mis à jour");
+    await refresh();
+  }
+
   return (
     <AdminLayout
       title="Knowledge Base"
