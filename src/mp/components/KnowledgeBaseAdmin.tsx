@@ -82,12 +82,29 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documents]);
 
+  async function withForbidden<T>(action: string, fn: () => Promise<T>): Promise<T | undefined> {
+    try {
+      return await fn();
+    } catch (err) {
+      const status = (err as { status?: number; response?: { status?: number } })?.status
+        ?? (err as { response?: { status?: number } })?.response?.status;
+      if (status === 403) {
+        toast.error(`Action refusée : vous n'avez pas le rôle requis (${action}).`);
+        return undefined;
+      }
+      throw err;
+    }
+  }
+
   async function ingestText() {
-    await api.post("/admin/kb/upload", {
-      title: "Note PMO locale.md",
-      mimeType: "text/markdown",
-      text: sampleText,
-    });
+    const ok = await withForbidden("upload KB", () =>
+      api.post("/admin/kb/upload", {
+        title: "Note PMO locale.md",
+        mimeType: "text/markdown",
+        text: sampleText,
+      }),
+    );
+    if (ok === undefined) return;
     toast.success("Document envoyé pour revue");
     await refresh();
   }
@@ -99,20 +116,29 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
 
   async function publishSelected() {
     if (!selected || session.user.role !== "SUPER_ADMIN") return;
-    await api.post(`/admin/kb/documents/${selected.document.id}/publish`, {});
+    const ok = await withForbidden("publier", () =>
+      api.post(`/admin/kb/documents/${selected.document.id}/publish`, {}),
+    );
+    if (ok === undefined) return;
     toast.success("Document publié et vectorisation relancée");
     await refresh();
   }
 
   async function reindexSelected() {
     if (!selected || session.user.role !== "SUPER_ADMIN") return;
-    await api.post(`/admin/kb/documents/${selected.document.id}/reindex`, {});
+    const ok = await withForbidden("réindexer", () =>
+      api.post(`/admin/kb/documents/${selected.document.id}/reindex`, {}),
+    );
+    if (ok === undefined) return;
     toast.success("Réindexation lancée");
   }
 
   async function updateTags(documentId: string, industryTags: string[], pmDomainTags: string[]) {
     if (session.user.role !== "SUPER_ADMIN") return;
-    await api.patch(`/admin/kb/documents/${documentId}`, { industryTags, pmDomainTags });
+    const ok = await withForbidden("éditer les tags", () =>
+      api.patch(`/admin/kb/documents/${documentId}`, { industryTags, pmDomainTags }),
+    );
+    if (ok === undefined) return;
     toast.success("Tags mis à jour");
     await refresh();
   }

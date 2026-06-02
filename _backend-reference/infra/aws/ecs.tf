@@ -115,6 +115,7 @@ locals {
     { name = "SQS_INGESTION_URL", value = aws_sqs_queue.ingestion.url },
     { name = "COGNITO_USER_POOL_ID", value = aws_cognito_user_pool.main.id },
     { name = "COGNITO_CLIENT_ID", value = aws_cognito_user_pool_client.web.id },
+    { name = "ALLOW_LOCAL_AUTH", value = "false" },
     { name = "AOSS_ENDPOINT", value = aws_opensearchserverless_collection.vectors.collection_endpoint },
     { name = "SECRETS_PREFIX", value = "${local.name}/ai-providers" },
     { name = "WEB_ALLOWED_ORIGINS", value = join(",", var.web_allowed_origins) },

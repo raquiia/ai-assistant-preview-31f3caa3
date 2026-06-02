@@ -38,15 +38,28 @@ export async function jitProvisionUser(
   deps: { repo: JitRepo; audit: JitAudit }
 ): Promise<JitUser> {
   const id = claims.sub;
+  const groups = (claims["cognito:groups"] as string[] | undefined) ?? [];
+  const hasAnyGroup = groups.length > 0;
+
   let user = await deps.repo.findById(id);
 
   if (!user) {
+    // Empêcher la création JIT sans email vérifié — sécurité critique :
+    // sinon un attaquant qui contrôle un mail non vérifié pourrait
+    // s'auto-provisionner avec un rôle CONSULTANT.
+    if (claims["email_verified"] === false) {
+      throw new Error("email_not_verified");
+    }
     user = await deps.repo.create({
       id,
       email: claims.email ?? `${id}@unknown.local`,
       name: claims["cognito:username"] ?? claims.email ?? id,
       role: claims.role,
-      status: claims.role === "CONSULTANT" ? "PENDING_MANAGER" : "ACTIVE",
+      status: hasAnyGroup
+        ? claims.role === "CONSULTANT"
+          ? "PENDING_MANAGER"
+          : "ACTIVE"
+        : "DISABLED",
       managerId: null,
       department: null,
       language: "fr",
@@ -56,7 +69,20 @@ export async function jitProvisionUser(
       actorId: id,
       entityType: "User",
       entityId: id,
-      metadataJson: { role: claims.role, source: "cognito" },
+      metadataJson: { role: claims.role, source: "cognito", groups },
+    });
+    return user;
+  }
+
+  // Révocation : utilisateur retiré de tous les groupes Cognito → DISABLED.
+  if (!hasAnyGroup && user.status !== "DISABLED") {
+    user = await deps.repo.update(id, { status: "DISABLED" });
+    deps.audit({
+      action: "user.disabled_by_group_removal",
+      actorId: id,
+      entityType: "User",
+      entityId: id,
+      metadataJson: { previousRole: user.role, source: "cognito" },
     });
     return user;
   }
@@ -65,7 +91,9 @@ export async function jitProvisionUser(
     const previous = user.role;
     user = await deps.repo.update(id, { role: claims.role });
     deps.audit({
-      action: "user.role_synced",
+      action: rolePriorityRank(claims.role) < rolePriorityRank(previous)
+        ? "user.role_demoted"
+        : "user.role_synced",
       actorId: id,
       entityType: "User",
       entityId: id,
@@ -74,4 +102,19 @@ export async function jitProvisionUser(
   }
 
   return user;
+}
+
+// Plus le nombre est élevé, plus le rôle est puissant.
+function rolePriorityRank(role: AppRole): number {
+  switch (role) {
+    case "SUPER_ADMIN":
+      return 4;
+    case "MANAGER":
+      return 3;
+    case "AUDITOR":
+      return 2;
+    case "CONSULTANT":
+    default:
+      return 1;
+  }
 }
