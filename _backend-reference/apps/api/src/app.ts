@@ -40,6 +40,48 @@ export async function buildApp() {
   const chat = new ChatService(repo);
   await repo.ready();
 
+  // AWS providers — null in local/dev, instantiated when env vars are set.
+  const aws = bootstrapProviders();
+  const region = process.env.AWS_REGION ?? "eu-west-3";
+  const cognitoAuth =
+    process.env.COGNITO_USER_POOL_ID && process.env.COGNITO_CLIENT_ID
+      ? new CognitoAuthProvider({
+          region,
+          userPoolId: process.env.COGNITO_USER_POOL_ID,
+          clientId: process.env.COGNITO_CLIENT_ID,
+        })
+      : null;
+  const cognitoAdmin = process.env.COGNITO_USER_POOL_ID
+    ? new CognitoAdminProvider({ region, userPoolId: process.env.COGNITO_USER_POOL_ID })
+    : null;
+  const aiProviderSvc = new AiProviderService({
+    region,
+    audit: (e) =>
+      repo.audit({ ...e, ip: null, userAgent: null }),
+  });
+  const jitRepo: JitRepo = {
+    async findById(id) {
+      const u = repo.findUserById(id);
+      return u ? toJit(u) : null;
+    },
+    async create(input) {
+      const now = new Date().toISOString();
+      const user: User = {
+        ...input,
+        createdAt: now,
+        updatedAt: now,
+      } as unknown as User;
+      repo.state.users.push(user);
+      return toJit(user);
+    },
+    async update(id, patch) {
+      const u = repo.findUserById(id);
+      if (!u) throw new Error("User not found");
+      Object.assign(u, patch, { updatedAt: new Date().toISOString() });
+      return toJit(u);
+    },
+  };
+
   await app.register(cors, {
     origin(origin, cb) {
       if (!origin || origin === env.appOrigin || repo.state.settings.allowedEmbedOrigins.includes(origin)) cb(null, true);
