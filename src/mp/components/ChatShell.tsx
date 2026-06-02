@@ -58,11 +58,16 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
   const [lastAnswer, setLastAnswer] = useState<ChatAnswerPayload | null>(null);
   const [sourceViewer, setSourceViewer] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  /** Wave 6.D — texte assistant en cours de stream (tokens accumulés). */
+  const [streamingText, setStreamingText] = useState("");
+  /** Wave 6.D — sources reçues avant la fin du stream (rail latéral live). */
+  const [streamingSources, setStreamingSources] = useState<SourceCitation[]>([]);
   const [showConversations, setShowConversations] = useState(false);
   const [showSources, setShowSources] = useState(false);
   const [filters, setFilters] = useState<ChatFilters>(() => loadFilters());
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     try { window.localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(filters)); } catch {}
@@ -75,7 +80,7 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
   }, [activeId]);
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages, lastAnswer]);
+  }, [messages, lastAnswer, streamingText]);
 
   async function refreshConversations() {
     try {
