@@ -74,6 +74,7 @@ export type ViewKey =
   | "chat"
   | "history"
   | "dashboard"
+  | "usage"
   | "users"
   | "kb"
   | "prompts"

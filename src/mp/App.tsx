@@ -12,6 +12,8 @@ import { ManagerAdminHistory } from "./components/ManagerAdminHistory";
 import { PendingApprovalScreen } from "./components/PendingApprovalScreen";
 import { PromptAndModelSettings } from "./components/PromptAndModelSettings";
 import { SuperAdminDashboard } from "./components/SuperAdminDashboard";
+import { UsageDashboard } from "./components/UsageDashboard";
+import { ModelSelector } from "./components/ModelSelector";
 import { UserManagement } from "./components/UserManagement";
 import type { Role } from "./shared";
 import type { ViewKey } from "./types";
@@ -52,6 +54,7 @@ function MpAppInner() {
       title: "Chat assistant",
       subtitle: "Conversation sourcée, citations explicites",
       roles: ["CONSULTANT", "MANAGER", "SUPER_ADMIN"],
+      actions: <ModelSelector api={api} compact />,
       content: <ChatShell api={api} session={session} />,
     },
     {
@@ -67,6 +70,13 @@ function MpAppInner() {
       subtitle: "KPI usage, latence, coûts",
       roles: ["MANAGER", "SUPER_ADMIN", "AUDITOR"],
       content: <SuperAdminDashboard api={api} />,
+    },
+    {
+      key: "usage",
+      title: "Budget & coûts",
+      subtitle: "Jauge mensuelle, tokens, modèles, ventilation par org.",
+      roles: ["CONSULTANT", "MANAGER", "SUPER_ADMIN", "AUDITOR"],
+      content: <UsageDashboard api={api} />,
     },
     {
       key: "kb",

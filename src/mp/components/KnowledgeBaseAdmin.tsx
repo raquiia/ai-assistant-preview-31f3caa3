@@ -6,6 +6,7 @@ import type { ApiClient } from "../api";
 import type { Session } from "../types";
 import { AdminLayout } from "./AdminLayout";
 import { EmptyState } from "./EmptyState";
+import { IngestionStatus } from "./IngestionStatus";
 import { UploadPanel } from "./UploadPanel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -221,6 +222,14 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
                     : "Document publié et disponible pour le retrieval."}
                 </p>
               </div>
+
+              <div>
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Pipeline d'ingestion AWS
+                </p>
+                <IngestionStatus api={api} documentId={selected.document.id} />
+              </div>
+
 
               {session.user.role === "SUPER_ADMIN" &&
                 selected.document.status === "NEEDS_REVIEW" && (
