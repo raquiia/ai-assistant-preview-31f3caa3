@@ -283,6 +283,23 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
                             <Badge variant="outline" className="border-warning/40 bg-warning/10 text-warning">escalade</Badge>
                           )}
                         </div>
+                        {lastAnswer.appliedFilters &&
+                          (lastAnswer.appliedFilters.industryTags.length > 0 ||
+                            lastAnswer.appliedFilters.pmDomainTags.length > 0) && (
+                            <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                              <span className="text-muted-foreground">Orientée:</span>
+                              {lastAnswer.appliedFilters.industryTags.map((t) => (
+                                <Badge key={`i-${t}`} variant="outline" className="border-primary/30 bg-primary/5 text-[10px]">
+                                  {labelForIndustry(t)}
+                                </Badge>
+                              ))}
+                              {lastAnswer.appliedFilters.pmDomainTags.map((t) => (
+                                <Badge key={`d-${t}`} variant="outline" className="border-primary/30 bg-primary/5 text-[10px]">
+                                  {labelForPmDomain(t)}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
                         <div>
                           <div className="mb-1 flex items-center justify-between text-xs">
                             <span className="text-muted-foreground">Confiance · {confLabel}</span>
