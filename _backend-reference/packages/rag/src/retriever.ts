@@ -55,7 +55,9 @@ export class HybridRetriever {
           timeEnd: chunk.timeEnd,
           excerpt: chunk.text.length > 320 ? `${chunk.text.slice(0, 317)}...` : chunk.text,
           score,
-          sourceUri: chunk.sourceUri
+          sourceUri: chunk.sourceUri,
+          industryTags: chunk.industryTags,
+          pmDomainTags: chunk.pmDomainTags
         } satisfies SourceCitation;
       })
       .filter((source) => source.score >= options.minScore)
