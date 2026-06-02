@@ -371,6 +371,44 @@ export function handleMock<T>(
     return sess as T;
   }
 
+  if (method === "POST" && path === "/auth/register") {
+    const payload = (body ?? {}) as {
+      email?: string;
+      name?: string;
+      password?: string;
+      managerId?: string;
+      department?: string;
+      language?: string;
+    };
+    const email = (payload.email ?? "").trim().toLowerCase();
+    const name = (payload.name ?? "").trim();
+    const managerId = payload.managerId ?? null;
+    if (!email || !name) throw new Error("Nom et email sont requis");
+    if (!payload.password || payload.password.length < 6)
+      throw new Error("Mot de passe trop court (6 caractères minimum)");
+    if (users.some((u) => u.email.toLowerCase() === email))
+      throw new Error("Un compte avec cet email existe déjà");
+    if (!managerId || !users.some((u) => u.id === managerId && u.role === "MANAGER"))
+      throw new Error("Manager invalide");
+    const manager = users.find((u) => u.id === managerId)!;
+    const newUser: User = {
+      id: id("u"),
+      email,
+      name,
+      role: "CONSULTANT",
+      managerId,
+      language: payload.language ?? "fr",
+      status: "ACTIVE",
+      department: payload.department ?? manager.department ?? null,
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    users.push(newUser);
+    return { user: newUser, accessToken: `mock-token-${newUser.id}` } as T;
+  }
+
+
+
 
   // CHAT
   if (method === "GET" && path === "/chat/conversations") {
