@@ -5,12 +5,15 @@
 
 ## TL;DR
 
-Le frontend est mûr et appelle des endpoints REST cohérents (mockés par défaut, branchables sur `VITE_API_URL`). Le code applicatif Fastify implémente les routes attendues, mais **deux gros chantiers bloquent un déploiement AWS réel** :
+Mise à jour 2026-06-02 (commit "AWS-ready") :
 
-1. **L'API est encore in-memory** (`apps/api/src/state.ts`) — déployer tel quel sur ECS = appli amnésique à chaque restart.
-2. **Le squelette Terraform est très incomplet** — seulement KMS + S3 + SQS + Cognito + Secrets + CloudWatch. Pas de VPC, ni RDS, ni ECS, ni OpenSearch, ni CloudFront/WAF, ni IAM scoping.
+- **P0 #1 Terraform incomplet → RÉSOLU.** VPC + sous-réseaux 3-AZ + NAT + VPC endpoints, RDS Postgres 16 Multi-AZ encrypted, OpenSearch Serverless (collection + 3 policies + VPCE), ECR (3 repos), ECS Fargate (cluster + 3 task defs + 3 services + ALB + autoscaling), IAM (execution + 2 task roles least-privilege), CloudFront/WAF conditionnels via `web_domain`, CloudWatch (dashboard + 3 alarmes + SNS) — tout en place dans `infra/aws/{network,security,rds,aoss,ecr,ecs,iam,cloudfront,cloudwatch}.tf`.
+- **P0 #2 API in-memory → SEAM EN PLACE.** Le repository devient pluggable via `apps/api/src/repository/index.ts` : `AppRepository` (in-memory, défaut) si `DATABASE_URL` absent, `PrismaAppRepository` (write-through cache + persistance Prisma) sinon. Pas de breaking change sur les call sites `state.X.find/push`.
+- **Adaptateurs AWS** : `apps/api/src/providers/aws/{s3-storage,sqs-queue,secrets-manager,cognito-auth,opensearch-vector}.ts` + bootstrap `apps/api/src/bootstrap.ts` + worker `apps/worker/src/providers/aws/sqs-consumer.ts`. Switch piloté par env vars (cf. § 8 du DEPLOYMENT.md).
+- **Pipeline de déploiement** : `scripts/deploy.sh` (Terraform apply → buildx push ECR → Terraform apply image tags → `prisma migrate deploy` via ECS run-task) + `scripts/destroy.sh` + `DEPLOYMENT.md` complet (10 sections, prérequis, bootstrap Cognito, runbook day-2, coûts).
+- **Reste hors scope** : extraction lourde (Textract/Transcribe), Secrets Manager rotation lambdas, CI/CD GitHub Actions, bastion SSM pour accès RDS, observabilité OpenTelemetry.
 
-Ce document trace la correspondance feature → API → AWS, classe les manques en P0/P1/P2 et fournit une checklist de mise en production.
+Le code applicatif Fastify implémente les routes attendues et le frontend Lovable est mûr et bascule sur l'API en mettant `VITE_API_URL` + `VITE_USE_MOCKS=false`.
 
 ## 1. Matrice feature → endpoint → AWS
 

@@ -5,6 +5,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.80"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 }
 
@@ -237,60 +241,7 @@ resource "aws_cloudwatch_log_group" "worker" {
 }
 
 # ---------------------------------------------------------------------------
-# Placeholders — declared structurally so the diff with target architecture
-# is visible, but commented out until network and DNS decisions are made.
-#
-# When ready:
-#   1. Provision a VPC module (private + public subnets, NAT, VPC endpoints
-#      for S3, Secrets Manager, KMS, ECR, CloudWatch, AOSS).
-#   2. Uncomment and wire the resources below to that VPC.
-#   3. Add IAM task roles per service with least-privilege policies scoped
-#      to the specific bucket, queue, secrets, AOSS collection and KMS key.
-#   4. Add CloudFront distributions for `apps/web` and `/embed/*`, with a
-#      WAF web ACL and `Content-Security-Policy: frame-ancestors` honoring
-#      the embed origin allowlist.
-#   5. Add Secrets Manager rotation lambdas for the AI provider keys.
+# Network, RDS, AOSS, ECR, ECS, IAM, CloudFront and CloudWatch are declared in
+# their own files (network.tf, rds.tf, aoss.tf, ecr.tf, ecs.tf, iam.tf,
+# cloudfront.tf, cloudwatch.tf, security.tf).
 # ---------------------------------------------------------------------------
-
-# resource "aws_db_instance" "postgres" {
-#   identifier              = "${local.name}-postgres"
-#   engine                  = "postgres"
-#   engine_version          = "16"
-#   instance_class          = "db.t4g.medium"
-#   allocated_storage       = 50
-#   storage_encrypted       = true
-#   kms_key_id              = aws_kms_key.secrets.arn
-#   db_subnet_group_name    = aws_db_subnet_group.main.name
-#   vpc_security_group_ids  = [aws_security_group.rds.id]
-#   backup_retention_period = 14
-#   deletion_protection     = true
-#   tags                    = local.tags
-# }
-
-# resource "aws_opensearchserverless_collection" "vectors" {
-#   name = "${local.name}-vectors"
-#   type = "VECTORSEARCH"
-#   tags = local.tags
-#   # Requires encryption, network and data access policies declared first.
-# }
-
-# resource "aws_ecs_cluster" "main" {
-#   name = local.name
-#   setting {
-#     name  = "containerInsights"
-#     value = "enabled"
-#   }
-#   tags = local.tags
-# }
-
-# resource "aws_cloudfront_distribution" "web" {
-#   # Origin: S3 static bucket for apps/web
-#   # Behaviors: SPA fallback to /index.html
-#   # WAF: aws_wafv2_web_acl
-#   # Response headers policy: strict CSP, HSTS, frame-ancestors per env
-# }
-
-# resource "aws_cloudfront_distribution" "embed" {
-#   # Origin: ALB serving /embed/* from apps/api
-#   # Strict CSP with frame-ancestors limited to embed allowlist
-# }

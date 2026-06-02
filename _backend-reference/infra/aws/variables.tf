@@ -1,47 +1,136 @@
-variable "project_name" {
-  type    = string
-  default = "mp-ai-assistant"
+variable "aws_region" {
+  description = "AWS region"
+  type        = string
+  default     = "eu-west-3"
 }
 
-variable "aws_region" {
-  type    = string
-  default = "eu-west-3"
+variable "project_name" {
+  description = "Short project identifier"
+  type        = string
+  default     = "migso-pcubed"
 }
 
 variable "environment" {
-  type    = string
-  default = "dev"
+  description = "Deployment environment (dev, staging, prod)"
+  type        = string
+  default     = "dev"
 }
 
-variable "container_image_api" {
-  type    = string
-  default = "replace-me-api"
+# ---- Network ----
+variable "vpc_cidr" {
+  description = "CIDR block for the VPC"
+  type        = string
+  default     = "10.0.0.0/16"
 }
 
-variable "container_image_web" {
-  type    = string
-  default = "replace-me-web"
-}
-
-variable "container_image_worker" {
-  type    = string
-  default = "replace-me-worker"
-}
-
+# ---- Web / CORS / OAuth ----
 variable "web_allowed_origins" {
-  description = "Origins allowed to PUT presigned KB uploads to the S3 knowledge bucket."
+  description = "Frontend origins allowed for CORS + S3 presigned uploads"
   type        = list(string)
-  default     = ["https://localhost:5173"]
+  default     = ["http://localhost:5173"]
 }
 
 variable "web_callback_urls" {
-  description = "Cognito Hosted UI callback URLs for apps/web."
+  description = "Cognito hosted UI callback URLs"
   type        = list(string)
-  default     = ["https://localhost:5173/auth/callback"]
+  default     = ["http://localhost:5173/callback"]
 }
 
 variable "web_logout_urls" {
-  description = "Cognito Hosted UI logout URLs for apps/web."
+  description = "Cognito hosted UI logout URLs"
   type        = list(string)
-  default     = ["https://localhost:5173/auth/logout"]
+  default     = ["http://localhost:5173"]
+}
+
+variable "web_domain" {
+  description = "Public domain for the web app (empty = use ALB DNS, skip CloudFront/WAF)"
+  type        = string
+  default     = ""
+}
+
+variable "cloudfront_certificate_arn" {
+  description = "ACM cert ARN in us-east-1 for CloudFront (required if web_domain is set)"
+  type        = string
+  default     = ""
+}
+
+variable "acm_certificate_arn" {
+  description = "ACM cert ARN in the project region for the ALB (empty = HTTP only)"
+  type        = string
+  default     = ""
+}
+
+# ---- RDS ----
+variable "rds_instance_class" {
+  type    = string
+  default = "db.t4g.medium"
+}
+
+variable "rds_multi_az" {
+  type    = bool
+  default = true
+}
+
+variable "rds_deletion_protection" {
+  type    = bool
+  default = true
+}
+
+# ---- ECS image tags (overridden by deploy.sh) ----
+variable "api_image_tag" {
+  type    = string
+  default = "latest"
+}
+
+variable "web_image_tag" {
+  type    = string
+  default = "latest"
+}
+
+variable "worker_image_tag" {
+  type    = string
+  default = "latest"
+}
+
+# ---- ECS sizing ----
+variable "api_cpu" {
+  type    = number
+  default = 512
+}
+
+variable "api_memory" {
+  type    = number
+  default = 1024
+}
+
+variable "api_desired_count" {
+  type    = number
+  default = 2
+}
+
+variable "api_max_capacity" {
+  type    = number
+  default = 6
+}
+
+variable "worker_cpu" {
+  type    = number
+  default = 512
+}
+
+variable "worker_memory" {
+  type    = number
+  default = 1024
+}
+
+variable "worker_desired_count" {
+  type    = number
+  default = 1
+}
+
+# ---- Observability ----
+variable "alarm_email" {
+  description = "Email to subscribe to SNS alarms topic (empty = no subscription)"
+  type        = string
+  default     = ""
 }
