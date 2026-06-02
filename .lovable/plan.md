@@ -1,42 +1,50 @@
-# Refonte UX de la Knowledge Base — fin du scroll latéral
+# Enrichir le Dashboard Super Admin avec la satisfaction
 
-## Problème
-La table actuelle a 7 colonnes (Document, Type, Tags, Statut, Version, Langue, Date) + un panneau latéral de 440px. À 1299px de viewport, ça force un scroll horizontal et tronque l'info utile (Tags, Statut).
+## Constat
 
-## Solution proposée — Vue "cartes" denses + panneau latéral
+Le dashboard actuel (`src/mp/components/SuperAdminDashboard.tsx`) affiche 4 KPI : Questions, Utilisateurs actifs, Fallback, Coût estimé — plus latence p50/p95, fallback, escalade et un journal d'activité.
 
-Remplacer la `DataTable` par une **liste de cartes verticales** (une carte = un document), qui s'adapte naturellement à la largeur disponible. Pas de scroll horizontal, info hiérarchisée.
+Il manque les indicateurs liés au **feedback utilisateur**, alors que le système collecte déjà :
+- des votes pouce haut / pouce bas (`UP` / `DOWN`)
+- des notes 1 à 5 étoiles (`ONE`…`FIVE`)
+- des commentaires libres
 
-### Structure d'une carte (responsive)
-```text
-┌──────────────────────────────────────────────────────────┐
-│ 📄 Titre du document.pdf                    [PUBLISHED]  │
-│    pdf · v2 · FR · 12 nov. 2026                          │
-│                                                          │
-│    [Industrie X] [Industrie Y] [Domaine A]    [✏️ Tags]  │
-└──────────────────────────────────────────────────────────┘
-```
-- **Ligne 1** : icône + titre (tronqué si besoin) + badge statut à droite
-- **Ligne 2** : métadonnées secondaires fusionnées (`type · version · langue · date`) en petit muted
-- **Ligne 3** : tags (avec « Générique » si vide) + bouton crayon (SUPER_ADMIN uniquement) à droite
-- Carte cliquable → ouvre le détail dans le panneau de droite (comportement actuel)
-- État sélectionné mis en évidence (ring primary)
+Aucun de ces signaux n'est aujourd'hui agrégé dans le dashboard.
 
-### Barre d'outils au-dessus de la liste
-- **Recherche** (input) : filtre par titre
-- **Filtre tags** : popover réutilisant `TagEditor` pour ne montrer que les docs taggés X/Y
-- **Filtre statut** : Select (Tous / NEEDS_REVIEW / PUBLISHED)
-- Compteur « N documents » à droite
+## Ce que je propose d'ajouter
 
-### Layout général
-- Garder la grille `1fr / 440px` sur `xl+`
-- Sous `xl` (< 1280px) : empiler verticalement (liste pleine largeur, puis détail en-dessous, ou via Sheet)
-- À 1299px on est juste au-dessus du seuil xl — on conservera la grille mais sans table donc plus de scroll horizontal
+### 1. Nouveaux KPI exposés par le payload dashboard
 
-## Fichiers touchés
-- `src/mp/components/KnowledgeBaseAdmin.tsx` : remplacer le bloc `<DataTable …>` par une liste de cartes + barre d'outils ; extraire un petit composant `DocumentCard` local. Le panneau de droite, `TagEditor` et `TagList` restent inchangés.
+Étendre `DashboardPayload.kpis` (`src/mp/types.ts`) avec :
+- `satisfactionRate` (% de feedbacks positifs : `UP`, `FOUR`, `FIVE`)
+- `feedbackCount` (volume total de feedbacks)
+- `averageStars` (moyenne des notes 1–5, ignore UP/DOWN)
+- `positiveCount`, `neutralCount`, `negativeCount` (répartition)
 
-## Hors scope
-- Pas de changement backend, pas de nouveau champ
-- Pas de modification de l'upload, du chat, ni des permissions
-- Pas de pagination (volume actuel faible) — facile à ajouter ensuite si besoin
+### 2. Mock backend cohérent
+
+Mettre à jour `src/mp/mocks.ts` (`GET /admin/dashboard`) pour calculer ces valeurs à partir de `historyFeedback` déjà présent dans les mocks (UP, DOWN, THREE…), afin que les chiffres soient cohérents avec ce que le manager voit dans l'historique.
+
+### 3. UI dashboard
+
+Dans `SuperAdminDashboard.tsx` :
+
+- **Carte KPI "Satisfaction"** en première position (ton `success`), valeur `XX %`, hint = nombre de feedbacks (`N retours`).
+- Réorganiser la grille de cartes en 5 KPI clés (responsive `md:grid-cols-2 xl:grid-cols-4` → on garde 4 cartes principales : Satisfaction, Questions, Fallback, Coût ; Utilisateurs actifs et latence p50 passent dans une seconde ligne secondaire).
+- Nouvelle **section "Qualité perçue"** à côté de "Latence & qualité" :
+  - barre empilée Positif / Neutre / Négatif
+  - moyenne d'étoiles affichée en grand (`★ 4,2 / 5`)
+  - compteur de feedbacks totaux
+- Mettre à jour `hasOperationalData` pour qu'il prenne aussi `feedbackCount > 0` en compte.
+
+### 4. État vide
+
+Si `feedbackCount === 0`, afficher dans la section Qualité perçue un `EmptyState` discret ("Aucun retour utilisateur pour le moment"), sans inventer de chiffre — conforme à la règle "zéro chiffre inventé".
+
+## Fichiers modifiés
+
+- `src/mp/types.ts` — extension de `DashboardPayload.kpis`
+- `src/mp/mocks.ts` — calcul des nouveaux KPI à partir de `historyFeedback`
+- `src/mp/components/SuperAdminDashboard.tsx` — nouvelle carte Satisfaction + section Qualité perçue
+
+Aucun changement de routing, d'auth ou de schéma backend réel — uniquement la couche présentation et le contrat de payload côté front/mock.

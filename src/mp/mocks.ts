@@ -861,15 +861,44 @@ export function handleMock<T>(
 
   // DASHBOARD
   if (method === "GET" && path.startsWith("/admin/dashboard")) {
+    const POSITIVE = new Set(["UP", "FOUR", "FIVE"]);
+    const NEGATIVE = new Set(["DOWN", "ONE", "TWO"]);
+    const STAR_MAP: Record<string, number> = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
+    let positive = 0;
+    let negative = 0;
+    let neutral = 0;
+    let starSum = 0;
+    let starCount = 0;
+    for (const list of Object.values(historyFeedback)) {
+      for (const fb of list) {
+        if (POSITIVE.has(fb.rating)) positive += 1;
+        else if (NEGATIVE.has(fb.rating)) negative += 1;
+        else neutral += 1;
+        const star = STAR_MAP[fb.rating];
+        if (star) {
+          starSum += star;
+          starCount += 1;
+        }
+      }
+    }
+    const feedbackCount = positive + negative + neutral;
+    const satisfactionRate = feedbackCount ? Math.round((positive / feedbackCount) * 100) : 0;
+    const averageStars = starCount ? Math.round((starSum / starCount) * 10) / 10 : 0;
     const payload: DashboardPayload = {
       kpis: {
         questions: 142,
         activeUsers: 18,
-        fallbackRate: 0.06,
-        escalationRate: 0.02,
+        fallbackRate: 6,
+        escalationRate: 2,
         latencyP50: 380,
         latencyP95: 920,
         estimatedCost: 4.21,
+        satisfactionRate,
+        feedbackCount,
+        averageStars,
+        positiveCount: positive,
+        neutralCount: neutral,
+        negativeCount: negative,
       },
       metrics: [],
     };
