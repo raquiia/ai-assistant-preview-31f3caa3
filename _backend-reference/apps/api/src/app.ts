@@ -178,6 +178,44 @@ export async function buildApp() {
 
   app.get("/auth/me", { preHandler: auth(repo) }, async (request) => ({ user: request.actor }));
 
+  /**
+   * Cognito-backed bootstrap endpoint.
+   *
+   * Verifies the Cognito access token from the Authorization header, then
+   * just-in-time creates (or updates) the matching `User` row. Used by the
+   * frontend `cognitoProvider` after every login / refresh.
+   *
+   * In local mode (no Cognito configured) this aliases to /auth/me.
+   */
+  app.get("/me", async (request, reply) => {
+    if (!cognitoAuth) {
+      // Fall back to local session token.
+      try {
+        const header = request.headers.authorization;
+        const payload = verifyToken(header?.startsWith("Bearer ") ? header.slice(7) : "", "access");
+        const actor = repo.findUserById(payload.sub);
+        if (!actor) return reply.code(401).send({ error: "Unauthorized" });
+        return { user: actor };
+      } catch {
+        return reply.code(401).send({ error: "Unauthorized" });
+      }
+    }
+    try {
+      const claims = await cognitoAuth.verify(request.headers.authorization);
+      const user = await jitProvisionUser(claims, {
+        repo: jitRepo,
+        audit: (e) =>
+          repo.audit({ ...e, ip: request.ip, userAgent: request.headers["user-agent"] ?? null }),
+      });
+      return { user };
+    } catch (err) {
+      app.log.warn({ err }, "/me cognito verification failed");
+      return reply.code(401).send({ error: "Unauthorized" });
+    }
+  });
+
+
+
   app.post("/auth/first-visit/manager", { preHandler: auth(repo) }, async (request, reply) => {
     const actor = request.actor!;
     const body = request.body as { managerId?: string };
