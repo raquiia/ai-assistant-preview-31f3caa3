@@ -46,6 +46,15 @@ export interface IngestionDeps {
   vector?: OpenSearchVectorProvider;
   textract?: TextractProvider;
   transcribe?: TranscribeProvider;
+  /**
+   * Persist the PROCESSING handoff so the callback worker can find the
+   * Document again via externalJobId. No-op for in-memory tests.
+   */
+  markProcessing?: (
+    documentId: string,
+    externalJobId: string,
+    engine: "textract" | "transcribe"
+  ) => Promise<void>;
 }
 
 export type IngestionStatus = "PUBLISHED" | "NEEDS_REVIEW" | "PROCESSING";
@@ -66,6 +75,11 @@ export async function runIngestion(job: IngestionJob, deps: IngestionDeps = {}):
   const sync = await extractSync(job, deps);
   if (sync.async) {
     const document = baseDocument(job, "", "PROCESSING");
+    if (deps.markProcessing && sync.externalJobId) {
+      await deps
+        .markProcessing(job.documentId, sync.externalJobId, sync.engine ?? "textract")
+        .catch((err) => console.error("[ingestion] markProcessing failed:", err));
+    }
     return { document, chunks: [], status: "PROCESSING", warnings, externalJobId: sync.externalJobId };
   }
 
