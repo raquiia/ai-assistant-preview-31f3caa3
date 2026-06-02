@@ -307,6 +307,9 @@ function DocumentList({
   canEdit: boolean;
   onUpdateTags: (id: string, ind: string[], dom: string[]) => Promise<void>;
 }) {
+  const PAGE_SIZE = 12;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return documents.filter((d) => {
@@ -318,6 +321,12 @@ function DocumentList({
     });
   }, [documents, search, statusFilter, filterInd, filterDom]);
 
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [search, statusFilter, filterInd, filterDom]);
+
+  const visible = filtered.slice(0, visibleCount);
+  const remaining = filtered.length - visible.length;
   const activeFilters = filterInd.length + filterDom.length;
 
   return (
