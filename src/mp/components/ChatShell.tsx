@@ -333,6 +333,12 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
           {/* Input */}
           <div className="border-t bg-background/95 px-3 py-3 backdrop-blur-xl lg:px-6 lg:py-4">
             <div className="mx-auto w-full max-w-3xl">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <ChatFiltersBar filters={filters} onChange={setFilters} />
+                <span className="hidden text-[10px] text-muted-foreground sm:inline">
+                  Orientez les sources par secteur et/ou domaine
+                </span>
+              </div>
               <div className="group relative flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-soft transition focus-within:border-primary/40 focus-within:shadow-glow">
                 <textarea
                   ref={textareaRef}
