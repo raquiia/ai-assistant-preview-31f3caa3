@@ -223,6 +223,55 @@ const providers: AiProviderConfig[] = [
   },
 ];
 
+const appSettings: import("./shared").AppSettings = {
+  topK: 6,
+  minRelevanceScore: 0.65,
+  qualityThreshold: 0.7,
+  rerankerEnabled: true,
+  rerankerModel: "cohere-rerank-3",
+  embeddingModel: "text-embedding-3-large",
+  contextWindowTokens: 8000,
+  maxHistoryTurns: 8,
+  webFallbackEnabled: false,
+  temperature: 0.2,
+  topP: 0.95,
+  maxTokens: 800,
+  presencePenalty: 0,
+  frequencyPenalty: 0,
+  seed: null,
+  stopSequences: [],
+  streaming: true,
+  responseFormat: "text",
+  timeoutMs: 30000,
+  reasoningEffort: "medium",
+  verbosity: "balanced",
+  defaultModel: "google/gemini-3-flash-preview",
+  fallbackModel: "openai/gpt-5-mini",
+  fallbackTriggers: ["timeout", "rate_limit", "credit_exhausted"],
+  mistralModel: "mistral-large-latest",
+  openAiModel: "gpt-4o-mini",
+  searchProvider: "mock",
+  forbiddenTopics: ["données personnelles clients", "secrets commerciaux non publics"],
+  piiRedaction: true,
+  piiRedactionLevel: "standard",
+  safetyThreshold: "medium",
+  refusalTemplate:
+    "Je ne peux pas répondre à cette demande. Contactez votre manager pour une assistance humaine.",
+  logUserMessagesPlaintext: false,
+  dailyTokenBudget: 2_000_000,
+  monthlyCostCapEur: 1500,
+  requestsPerMinutePerUser: 20,
+  budgetAlertThreshold: 80,
+  allowedModelsByRole: {
+    CONSULTANT: ["google/gemini-3-flash-preview", "google/gemini-2.5-flash"],
+    MANAGER: ["google/gemini-3-flash-preview", "openai/gpt-5-mini", "google/gemini-2.5-pro"],
+    SUPER_ADMIN: ["*"],
+    AUDITOR: ["google/gemini-3-flash-preview"],
+  },
+  allowedEmbedOrigins: ["https://intranet.migso-pcubed.local"],
+};
+
+
 const auditEvents: AuditEvent[] = [
   {
     id: "a-1",
