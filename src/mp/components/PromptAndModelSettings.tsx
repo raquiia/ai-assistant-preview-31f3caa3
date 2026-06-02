@@ -30,7 +30,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
-import { Label } from "@/components/ui/label";
+
 import {
   Select,
   SelectContent,
