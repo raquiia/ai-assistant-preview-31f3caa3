@@ -235,26 +235,52 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
                     </div>
                   )}
 
-                  {lastAnswer && (
-                    <div className="space-y-3 pt-2">
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        <Badge variant="secondary" className="font-mono text-[10px]">{lastAnswer.response.model}</Badge>
-                        <span>·</span>
-                        <span>Confiance {lastAnswer.response.confidence}/100</span>
-                        <span>·</span>
-                        <span>{lastAnswer.response.latencyMs}ms</span>
-                        {lastAnswer.response.fallbackUsed && <Badge variant="outline" className="text-[10px]">fallback</Badge>}
-                      </div>
-                      <FeedbackButtons api={api} responseId={lastAnswer.response.id} onRetry={retryFallback} />
-                      {hasSources && (
-                        <div className="lg:hidden">
-                          <Button variant="outline" size="sm" onClick={() => setShowSources(true)} className="w-full">
-                            <Database className="mr-1.5 size-3.5" /> Voir les {shownSources.length} sources
-                          </Button>
+                  {lastAnswer && (() => {
+                    const conf = Math.max(0, Math.min(100, lastAnswer.response.confidence ?? 0));
+                    const confTone = conf >= 80 ? "bg-success" : conf >= 60 ? "bg-warning" : "bg-destructive";
+                    const confLabel = conf >= 80 ? "Élevée" : conf >= 60 ? "Modérée" : "Faible";
+                    const isFallback = lastAnswer.response.fallbackUsed;
+                    const providerLabel = isFallback ? "OpenAI · fallback" : "Mistral";
+                    return (
+                      <div className="space-y-3 rounded-xl border bg-card/60 p-3 backdrop-blur">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge
+                            variant={isFallback ? "outline" : "secondary"}
+                            className={`gap-1 ${isFallback ? "border-warning/40 bg-warning/10 text-warning" : ""}`}
+                          >
+                            <Sparkles className="size-3" /> {providerLabel}
+                          </Badge>
+                          <Badge variant="outline" className="font-mono text-[10px]">{lastAnswer.response.model}</Badge>
+                          <span className="text-xs text-muted-foreground">{lastAnswer.response.latencyMs}ms</span>
+                          {lastAnswer.response.escalationTriggered && (
+                            <Badge variant="outline" className="border-warning/40 bg-warning/10 text-warning">escalade</Badge>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  )}
+                        <div>
+                          <div className="mb-1 flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground">Confiance · {confLabel}</span>
+                            <span className="font-mono tabular-nums text-muted-foreground">{conf}%</span>
+                          </div>
+                          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                            <div className={`h-full rounded-full transition-all ${confTone}`} style={{ width: `${conf}%` }} />
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <FeedbackButtons api={api} responseId={lastAnswer.response.id} onRetry={retryFallback} />
+                          {!isFallback && (
+                            <Button size="sm" variant="outline" onClick={() => void retryFallback()} className="h-7 gap-1.5 text-xs">
+                              <Zap className="size-3" /> Régénérer avec OpenAI
+                            </Button>
+                          )}
+                          {hasSources && (
+                            <Button variant="outline" size="sm" onClick={() => setShowSources(true)} className="h-7 gap-1.5 text-xs lg:hidden">
+                              <Database className="size-3" /> {shownSources.length} source{shownSources.length > 1 ? "s" : ""}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
