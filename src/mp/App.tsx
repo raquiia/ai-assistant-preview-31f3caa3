@@ -31,7 +31,7 @@ import { SuperAdminDashboard } from "./components/SuperAdminDashboard";
 import { UserManagement } from "./components/UserManagement";
 import type { Session, ViewKey } from "./types";
 
-const nav = [
+const nav: Array<{ key: ViewKey; label: string; icon: typeof Bot; roles: Role[] }> = [
   { key: "chat", label: "Chat", icon: MessageSquareText, roles: ["CONSULTANT", "MANAGER", "SUPER_ADMIN"] },
   { key: "history", label: "Historique Q/R", icon: History, roles: ["MANAGER", "SUPER_ADMIN", "AUDITOR"] },
   { key: "dashboard", label: "Dashboard", icon: Gauge, roles: ["MANAGER", "SUPER_ADMIN", "AUDITOR"] },
@@ -40,7 +40,7 @@ const nav = [
   { key: "prompts", label: "Prompts & modeles", icon: KeyRound, roles: ["SUPER_ADMIN"] },
   { key: "audit", label: "Audit", icon: ShieldCheck, roles: ["SUPER_ADMIN", "AUDITOR"] },
   { key: "embed", label: "Embed", icon: ClipboardCheck, roles: ["SUPER_ADMIN"] },
-] satisfies Array<{ key: ViewKey; label: string; icon: typeof Bot; roles: Role[] }>;
+];
 
 const SESSION_KEY = "mp-session";
 const NAV_KEY = "mp-nav-collapsed";
