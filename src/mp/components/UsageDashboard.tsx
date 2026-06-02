@@ -41,7 +41,16 @@ interface UsageSeries {
   series: Array<{ date: string; cost: number; tokensIn: number; tokensOut: number; requests: number }>;
   totals: { cost: number; tokensIn: number; tokensOut: number; requests: number };
   byModel: Array<{ model: string; cost: number; tokens: number; requests: number; share: number }>;
+  cache?: {
+    hitRate: number;
+    hits: number;
+    misses: number;
+    entries: number;
+    savedCost: number;
+    savedLatencyMsAvg: number;
+  };
 }
+
 
 interface BudgetPayload {
   period: string;
@@ -167,6 +176,55 @@ export function UsageDashboard({ api }: { api: ApiClient }) {
               <KpiCard label="Tokens out" value={`${(usage.totals.tokensOut / 1000).toFixed(0)}k`} icon={<Layers size={16} />} />
             </div>
           )}
+
+          {/* Wave 6.E — LLM response cache (DynamoDB) */}
+          {usage?.cache && (
+            <Card className="border-emerald-500/30 bg-emerald-500/[0.03]">
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle className="flex items-center gap-2 text-sm">
+                      ⚡ Cache LLM (DynamoDB)
+                    </CardTitle>
+                    <CardDescription className="mt-1">
+                      Réponses déterministes ré-utilisées sans appel Bedrock. TTL 7 jours, contournement
+                      auto si <code className="rounded bg-muted px-1 py-0.5 text-[10px]">Cache-Control: no-store</code>,
+                      temperature &gt; 0.3 ou question volatile.
+                    </CardDescription>
+                  </div>
+                  <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                    {(usage.cache.hitRate * 100).toFixed(1)}% hit
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <Progress value={usage.cache.hitRate * 100} className="h-1.5" />
+                <div className="mt-4 grid grid-cols-2 gap-3 text-xs lg:grid-cols-4">
+                  <div>
+                    <p className="text-muted-foreground">Hits / Misses</p>
+                    <p className="mt-0.5 font-mono text-sm">
+                      {usage.cache.hits} / {usage.cache.misses}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Entrées cache</p>
+                    <p className="mt-0.5 font-mono text-sm">{usage.cache.entries}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Coût économisé</p>
+                    <p className="mt-0.5 font-mono text-sm text-emerald-600 dark:text-emerald-400">
+                      ${usage.cache.savedCost.toFixed(2)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Latence évitée /hit</p>
+                    <p className="mt-0.5 font-mono text-sm">~{usage.cache.savedLatencyMsAvg} ms</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
 
           {/* Charts */}
           {usage && (
