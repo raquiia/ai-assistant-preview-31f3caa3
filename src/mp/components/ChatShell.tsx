@@ -422,12 +422,14 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
                   <VoiceInput onTranscript={(t) => setQuestion((c) => `${c}${c ? " " : ""}${t}`)} />
                   <Button
                     size="icon"
-                    onClick={() => void send()}
-                    disabled={!question.trim() && !loading}
+                    onClick={() => (loading ? stopStream() : void send())}
+                    disabled={!loading && !question.trim()}
                     className="size-9 rounded-xl"
-                    aria-label={loading ? "Génération en cours" : "Envoyer"}
+                    variant={loading ? "destructive" : "default"}
+                    aria-label={loading ? "Arrêter la génération" : "Envoyer"}
+                    title={loading ? "Arrêter (Esc)" : "Envoyer (⏎)"}
                   >
-                    {loading ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
+                    {loading ? <Square className="size-3.5 fill-current" /> : <ArrowUp className="size-4" />}
                   </Button>
                 </div>
               </div>
