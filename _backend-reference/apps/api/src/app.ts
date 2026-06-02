@@ -656,10 +656,30 @@ export async function buildApp() {
 
   app.post("/superadmin/users", { preHandler: auth(repo) }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
-    const body = request.body as Partial<User> & { role?: Role };
+    const body = request.body as Partial<User> & { role?: Role; temporaryPassword?: string };
     if (!body.email || !body.name || !body.role) return reply.code(400).send({ error: "Missing email, name or role" });
+
+    // Dual-write to Cognito when configured. Cognito is source of truth for the
+    // user's `sub`, which becomes the DB primary key (matches `/me` JIT path).
+    let id = `usr-${crypto.randomUUID()}`;
+    if (cognitoAdmin) {
+      try {
+        const { sub } = await cognitoAdmin.createUser({
+          email: body.email,
+          name: body.name,
+          role: body.role as AppRole,
+          temporaryPassword: body.temporaryPassword,
+          suppressInvite: false,
+        });
+        id = sub;
+      } catch (err) {
+        app.log.error({ err }, "cognito AdminCreateUser failed");
+        return reply.code(502).send({ error: "Identity provider create failed" });
+      }
+    }
+
     const user: User = {
-      id: `usr-${crypto.randomUUID()}`,
+      id,
       email: body.email,
       name: body.name,
       role: body.role,
@@ -670,9 +690,25 @@ export async function buildApp() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    repo.state.users.push(user);
+    try {
+      repo.state.users.push(user);
+    } catch (err) {
+      // Rollback Cognito if DB persistence fails.
+      if (cognitoAdmin) await cognitoAdmin.deleteUser(body.email).catch(() => undefined);
+      throw err;
+    }
+    repo.audit({
+      actorId: request.actor!.id,
+      action: "USER_CREATED",
+      entityType: "User",
+      entityId: user.id,
+      metadataJson: { role: user.role, cognito: Boolean(cognitoAdmin) },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] ?? null
+    });
     return { user };
   });
+
 
   app.patch("/superadmin/users/:id", { preHandler: auth(repo) }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
