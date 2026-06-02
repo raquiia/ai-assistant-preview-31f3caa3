@@ -240,6 +240,8 @@ export interface SourceCitation {
   excerpt: string;
   score: number;
   sourceUri: string;
+  industryTags?: string[];
+  pmDomainTags?: string[];
 }
 
 export interface ChatAnswer {
@@ -249,6 +251,7 @@ export interface ChatAnswer {
   sources: SourceCitation[];
   retrievalEvents: RetrievalEvent[];
   escalationMessage?: string;
+  appliedFilters?: { industryTags: string[]; pmDomainTags: string[] };
 }
 
 export interface ChatRequest {
@@ -256,6 +259,9 @@ export interface ChatRequest {
   content: string;
   language?: string;
   channel?: ConversationChannel;
+  // Orientation optionnelle (ET logique). Vide = recherche générique sur toute la base.
+  industryTags?: string[];
+  pmDomainTags?: string[];
 }
 
 export interface AppSettings {
