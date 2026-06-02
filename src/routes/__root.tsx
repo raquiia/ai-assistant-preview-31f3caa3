@@ -14,6 +14,9 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { ThemeProvider } from "../lib/theme";
 import { AuthProvider } from "../mp/auth";
 import { Toaster } from "../components/ui/sonner";
+import { initObservability } from "../lib/observability";
+
+if (typeof window !== "undefined") initObservability();
 
 function NotFoundComponent() {
   return (
