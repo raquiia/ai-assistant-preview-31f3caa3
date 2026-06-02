@@ -1,9 +1,9 @@
 import { Search, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { User } from "@mp/shared";
-import type { ApiClient } from "../api.js";
-import type { Session } from "../types.js";
-import { EmptyState } from "./EmptyState.js";
+import type { User } from "../shared";
+import type { ApiClient } from "../api";
+import type { Session } from "../types";
+import { EmptyState } from "./EmptyState";
 
 interface Props {
   api: ApiClient;

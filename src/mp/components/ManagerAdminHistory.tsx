@@ -1,10 +1,10 @@
 import { Languages, MessageSquareText, MessageSquareWarning, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { ApiClient } from "../api.js";
-import type { HistoryRow } from "../types.js";
-import { AdminLayout } from "./AdminLayout.js";
-import { DataTable } from "./DataTable.js";
-import { EmptyState } from "./EmptyState.js";
+import type { ApiClient } from "../api";
+import type { HistoryRow } from "../types";
+import { AdminLayout } from "./AdminLayout";
+import { DataTable } from "./DataTable";
+import { EmptyState } from "./EmptyState";
 
 interface HistoryDetail extends HistoryRow {
   feedback: Array<{ id: string; userId: string; rating: string; comment?: string | null; createdAt: string }>;

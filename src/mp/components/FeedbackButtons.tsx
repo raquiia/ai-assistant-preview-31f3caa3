@@ -1,7 +1,7 @@
 import { RotateCcw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useState } from "react";
-import type { FeedbackRating } from "@mp/shared";
-import type { ApiClient } from "../api.js";
+import type { FeedbackRating } from "../shared";
+import type { ApiClient } from "../api";
 
 export function FeedbackButtons({ api, responseId, onRetry }: { api: ApiClient; responseId?: string; onRetry?: () => Promise<void> }) {
   const [retryAvailable, setRetryAvailable] = useState(false);

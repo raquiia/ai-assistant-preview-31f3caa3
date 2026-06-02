@@ -8,16 +8,16 @@ import {
   Users
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type { Conversation, Message, SourceCitation } from "@mp/shared";
-import type { ApiClient } from "../api.js";
-import type { ChatAnswerPayload, ConversationDetail, Session } from "../types.js";
-import { EmptyState } from "./EmptyState.js";
-import { FeedbackButtons } from "./FeedbackButtons.js";
-import { MessageBubble } from "./MessageBubble.js";
-import { SourceCards } from "./SourceCards.js";
-import { SourceViewer } from "./SourceViewer.js";
-import { UploadPanel } from "./UploadPanel.js";
-import { VoiceInput } from "./VoiceInput.js";
+import type { Conversation, Message, SourceCitation } from "../shared";
+import type { ApiClient } from "../api";
+import type { ChatAnswerPayload, ConversationDetail, Session } from "../types";
+import { EmptyState } from "./EmptyState";
+import { FeedbackButtons } from "./FeedbackButtons";
+import { MessageBubble } from "./MessageBubble";
+import { SourceCards } from "./SourceCards";
+import { SourceViewer } from "./SourceViewer";
+import { UploadPanel } from "./UploadPanel";
+import { VoiceInput } from "./VoiceInput";
 
 type MobilePanel = "chat" | "conversations" | "sources" | "feedback";
 

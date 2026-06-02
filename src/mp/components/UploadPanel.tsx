@@ -1,6 +1,6 @@
 import { FileUp } from "lucide-react";
 import { useState } from "react";
-import type { ApiClient } from "../api.js";
+import type { ApiClient } from "../api";
 
 export function UploadPanel({ api, onUploaded }: { api: ApiClient; onUploaded?: () => void }) {
   const [status, setStatus] = useState<string>("");

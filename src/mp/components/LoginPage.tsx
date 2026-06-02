@@ -1,8 +1,8 @@
 import { LockKeyhole, Mail, ShieldCheck } from "lucide-react";
-import { branding } from "@mp/config";
+import { branding } from "../branding";
 import { useState, type FormEvent } from "react";
-import { ApiClient } from "../api.js";
-import type { Session } from "../types.js";
+import { ApiClient } from "../api";
+import type { Session } from "../types";
 
 interface Props {
   onLogin: (session: Session) => void;

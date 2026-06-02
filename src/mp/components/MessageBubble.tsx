@@ -1,4 +1,4 @@
-import type { Message } from "@mp/shared";
+import type { Message } from "../shared";
 import { Bot, UserRound } from "lucide-react";
 
 export function MessageBubble({ message }: { message: Message }) {

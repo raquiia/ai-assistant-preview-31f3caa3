@@ -1,12 +1,12 @@
 import { FileText, RefreshCcw, ShieldCheck, UploadCloud } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { DocumentRecord } from "@mp/shared";
-import type { ApiClient } from "../api.js";
-import type { Session } from "../types.js";
-import { AdminLayout } from "./AdminLayout.js";
-import { DataTable } from "./DataTable.js";
-import { EmptyState } from "./EmptyState.js";
-import { UploadPanel } from "./UploadPanel.js";
+import type { DocumentRecord } from "../shared";
+import type { ApiClient } from "../api";
+import type { Session } from "../types";
+import { AdminLayout } from "./AdminLayout";
+import { DataTable } from "./DataTable";
+import { EmptyState } from "./EmptyState";
+import { UploadPanel } from "./UploadPanel";
 
 interface DocumentDetail {
   document: DocumentRecord;

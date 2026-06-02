@@ -1,10 +1,10 @@
 import { Activity, CircleDollarSign, Clock3, Database, MessageSquareText, ShieldAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { ApiClient } from "../api.js";
-import type { DashboardPayload } from "../types.js";
-import { AdminLayout } from "./AdminLayout.js";
-import { DashboardCards } from "./DashboardCards.js";
-import { EmptyState } from "./EmptyState.js";
+import type { ApiClient } from "../api";
+import type { DashboardPayload } from "../types";
+import { AdminLayout } from "./AdminLayout";
+import { DashboardCards } from "./DashboardCards";
+import { EmptyState } from "./EmptyState";
 
 export function SuperAdminDashboard({ api }: { api: ApiClient }) {
   const [payload, setPayload] = useState<DashboardPayload | null>(null);

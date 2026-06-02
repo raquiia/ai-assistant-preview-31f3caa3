@@ -10,11 +10,11 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { AiProviderConfig, PromptVersion } from "@mp/shared";
-import type { ApiClient } from "../api.js";
-import { AdminLayout } from "./AdminLayout.js";
-import { DataTable } from "./DataTable.js";
-import { EmptyState } from "./EmptyState.js";
+import type { AiProviderConfig, PromptVersion } from "../shared";
+import type { ApiClient } from "../api";
+import { AdminLayout } from "./AdminLayout";
+import { DataTable } from "./DataTable";
+import { EmptyState } from "./EmptyState";
 
 type Tone = "professional" | "consultative" | "concise" | "directive";
 

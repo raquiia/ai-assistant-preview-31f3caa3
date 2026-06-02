@@ -1,6 +1,6 @@
 import { ExternalLink } from "lucide-react";
-import type { SourceCitation } from "@mp/shared";
-import { EmptyState } from "./EmptyState.js";
+import type { SourceCitation } from "../shared";
+import { EmptyState } from "./EmptyState";
 
 export function SourceCards({ sources, onOpen }: { sources: SourceCitation[]; onOpen?: (chunkId: string) => void }) {
   if (!sources.length) {

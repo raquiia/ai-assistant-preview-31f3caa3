@@ -1,7 +1,7 @@
 import { ArrowLeft, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { ApiClient } from "../api.js";
-import { EmptyState } from "./EmptyState.js";
+import type { ApiClient } from "../api";
+import { EmptyState } from "./EmptyState";
 
 interface SourcePayload {
   chunk: {

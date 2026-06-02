@@ -1,10 +1,10 @@
 import { UserPlus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { User } from "@mp/shared";
-import type { ApiClient } from "../api.js";
-import { AdminLayout } from "./AdminLayout.js";
-import { DataTable } from "./DataTable.js";
-import { EmptyState } from "./EmptyState.js";
+import type { User } from "../shared";
+import type { ApiClient } from "../api";
+import { AdminLayout } from "./AdminLayout";
+import { DataTable } from "./DataTable";
+import { EmptyState } from "./EmptyState";
 
 export function UserManagement({ api }: { api: ApiClient }) {
   const [users, setUsers] = useState<User[]>([]);

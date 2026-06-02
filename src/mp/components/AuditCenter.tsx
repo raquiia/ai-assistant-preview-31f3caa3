@@ -1,10 +1,10 @@
 import { Download, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { AuditEvent } from "@mp/shared";
-import type { ApiClient } from "../api.js";
-import { AdminLayout } from "./AdminLayout.js";
-import { DataTable } from "./DataTable.js";
-import { EmptyState } from "./EmptyState.js";
+import type { AuditEvent } from "../shared";
+import type { ApiClient } from "../api";
+import { AdminLayout } from "./AdminLayout";
+import { DataTable } from "./DataTable";
+import { EmptyState } from "./EmptyState";
 
 interface SystemCardPayload {
   systemCard: {

@@ -1,9 +1,9 @@
 import { Copy, KeyRound, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
-import { API_URL } from "../api.js";
-import type { ApiClient } from "../api.js";
-import { AdminLayout } from "./AdminLayout.js";
-import { EmptyState } from "./EmptyState.js";
+import { API_URL } from "../api";
+import type { ApiClient } from "../api";
+import { AdminLayout } from "./AdminLayout";
+import { EmptyState } from "./EmptyState";
 
 export function EmbedPreview({ api }: { api: ApiClient }) {
   const [token, setToken] = useState("");
