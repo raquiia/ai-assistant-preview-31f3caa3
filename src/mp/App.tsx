@@ -1,6 +1,5 @@
 import { useMemo } from "react";
-import { ApiClient } from "./api";
-import { AuthProvider, useAuth } from "./auth";
+import { useAuth } from "./auth";
 import { AppShell, type ShellViewMeta } from "@/components/layout/AppShell";
 import { AuditCenter } from "./components/AuditCenter";
 import { ChatShell } from "./components/ChatShell";
@@ -98,9 +97,5 @@ function MpAppInner() {
 }
 
 export function MpApp() {
-  return (
-    <AuthProvider>
-      <MpAppInner />
-    </AuthProvider>
-  );
+  return <MpAppInner />;
 }
