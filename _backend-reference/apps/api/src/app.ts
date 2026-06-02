@@ -7,7 +7,7 @@ import {
   assertRole,
   canEditPrompts,
   canManageUsers,
-  canUploadKnowledge,
+  canViewAudit,
   canViewAudit,
   canViewConversation,
   detectLanguage,
