@@ -27,6 +27,7 @@ export interface ChatAnswerPayload {
   answer: string;
   sources: SourceCitation[];
   escalationMessage?: string;
+  appliedFilters?: { industryTags: string[]; pmDomainTags: string[] };
 }
 
 export interface HistoryRow {
