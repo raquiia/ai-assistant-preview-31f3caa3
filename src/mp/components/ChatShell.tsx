@@ -178,7 +178,12 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
       if ((e as Error)?.name === "AbortError") {
         toast.message("Génération interrompue");
       } else {
-        toast.error("La réponse a échoué", { description: e instanceof Error ? e.message : undefined });
+        // Wave 6.F — affiche le traceId pour que le support puisse retrouver la requête dans Sentry/CloudWatch
+        const traceId = (e as { traceId?: string })?.traceId;
+        const desc = e instanceof Error ? e.message : undefined;
+        toast.error("La réponse a échoué", {
+          description: traceId ? `${desc ?? ""}\nTrace: ${traceId.slice(0, 16)}…` : desc,
+        });
       }
     } finally {
       setStreamingText("");
