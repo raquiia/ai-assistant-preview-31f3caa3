@@ -1,0 +1,147 @@
+{
+  "Comment": "MP — orchestration ingestion lourde (S3 → extract → chunk → embed → AOSS → DB).",
+  "StartAt": "Classify",
+  "States": {
+    "Classify": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ClassifyFunctionArn}",
+        "Payload": {
+          "documentId.$": "$.documentId",
+          "objectKey.$": "$.objectKey",
+          "mimeType.$": "$.mimeType"
+        }
+      },
+      "ResultSelector": { "kind.$": "$.Payload.kind", "mimeType.$": "$.Payload.mimeType" },
+      "ResultPath": "$.classification",
+      "Next": "RouteByKind",
+      "Retry": [
+        { "ErrorEquals": ["States.TaskFailed"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2.0 }
+      ],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+    },
+
+    "RouteByKind": {
+      "Type": "Choice",
+      "Choices": [
+        { "Variable": "$.classification.kind", "StringEquals": "TEXT_SYNC", "Next": "ExtractSync" },
+        { "Variable": "$.classification.kind", "StringEquals": "OCR_ASYNC", "Next": "StartTextract" },
+        { "Variable": "$.classification.kind", "StringEquals": "AUDIO_VIDEO", "Next": "StartTranscribe" }
+      ],
+      "Default": "MarkFailed"
+    },
+
+    "ExtractSync": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": { "FunctionName": "${ExtractFunctionArn}", "Payload.$": "$" },
+      "ResultSelector": { "text.$": "$.Payload.text", "pages.$": "$.Payload.pages" },
+      "ResultPath": "$.extracted",
+      "Next": "Chunk",
+      "Retry": [{ "ErrorEquals": ["States.TaskFailed"], "IntervalSeconds": 5, "MaxAttempts": 2 }],
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+    },
+
+    "StartTextract": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:textract:startDocumentTextDetection.waitForTaskToken",
+      "Parameters": {
+        "DocumentLocation": { "S3Object": { "Bucket": "${S3KnowledgeBucket}", "Name.$": "$.objectKey" } },
+        "NotificationChannel": {
+          "RoleArn": "${TextractRoleArn}",
+          "SNSTopicArn": "${IngestionCallbackTopicArn}"
+        },
+        "ClientRequestToken.$": "$$.Task.Token"
+      },
+      "TimeoutSeconds": 3600,
+      "ResultPath": "$.extracted",
+      "Next": "Chunk",
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+    },
+
+    "StartTranscribe": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:transcribe:startTranscriptionJob.waitForTaskToken",
+      "Parameters": {
+        "TranscriptionJobName.$": "States.Format('mp-{}', $.documentId)",
+        "Media": { "MediaFileUri.$": "States.Format('s3://${S3KnowledgeBucket}/{}', $.objectKey)" },
+        "IdentifyLanguage": true,
+        "OutputBucketName": "${S3KnowledgeBucket}",
+        "OutputKey.$": "States.Format('transcripts/{}.json', $.documentId)"
+      },
+      "TimeoutSeconds": 7200,
+      "ResultPath": "$.extracted",
+      "Next": "Chunk",
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+    },
+
+    "Chunk": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": { "FunctionName": "${ChunkFunctionArn}", "Payload.$": "$" },
+      "ResultSelector": { "chunks.$": "$.Payload.chunks" },
+      "ResultPath": "$.chunked",
+      "Next": "EmbedBatches"
+    },
+
+    "EmbedBatches": {
+      "Type": "Map",
+      "ItemsPath": "$.chunked.chunks",
+      "MaxConcurrency": 4,
+      "ItemSelector": { "documentId.$": "$.documentId", "chunk.$": "$$.Map.Item.Value" },
+      "ItemProcessor": {
+        "ProcessorConfig": { "Mode": "INLINE" },
+        "StartAt": "EmbedOne",
+        "States": {
+          "EmbedOne": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": { "FunctionName": "${EmbedFunctionArn}", "Payload.$": "$" },
+            "ResultSelector": { "embedded.$": "$.Payload" },
+            "Retry": [
+              { "ErrorEquals": ["BedrockThrottlingException", "TooManyRequestsException"],
+                "IntervalSeconds": 2, "MaxAttempts": 6, "BackoffRate": 2.0, "JitterStrategy": "FULL" }
+            ],
+            "End": true
+          }
+        }
+      },
+      "ResultPath": "$.embedded",
+      "Next": "IndexBulk"
+    },
+
+    "IndexBulk": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": { "FunctionName": "${IndexFunctionArn}", "Payload.$": "$" },
+      "ResultPath": "$.indexed",
+      "Next": "MarkPublished",
+      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+    },
+
+    "MarkPublished": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${UpdateStatusFunctionArn}",
+        "Payload": { "documentId.$": "$.documentId", "status": "PUBLISHED" }
+      },
+      "End": true
+    },
+
+    "MarkFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${UpdateStatusFunctionArn}",
+        "Payload": {
+          "documentId.$": "$.documentId",
+          "status": "FAILED",
+          "error.$": "$.error"
+        }
+      },
+      "End": true
+    }
+  }
+}
