@@ -3,11 +3,13 @@ import { useAuth } from "./auth";
 import { AppShell, type ShellViewMeta } from "@/components/layout/AppShell";
 import { AuditCenter } from "./components/AuditCenter";
 import { ChatShell } from "./components/ChatShell";
+import { ConsultantApprovals } from "./components/ConsultantApprovals";
 import { EmbedPreview } from "./components/EmbedPreview";
 import { FirstVisitManagerSelection } from "./components/FirstVisitManagerSelection";
 import { KnowledgeBaseAdmin } from "./components/KnowledgeBaseAdmin";
 import { LoginPage } from "./components/LoginPage";
 import { ManagerAdminHistory } from "./components/ManagerAdminHistory";
+import { PendingApprovalScreen } from "./components/PendingApprovalScreen";
 import { PromptAndModelSettings } from "./components/PromptAndModelSettings";
 import { SuperAdminDashboard } from "./components/SuperAdminDashboard";
 import { UserManagement } from "./components/UserManagement";
@@ -15,7 +17,7 @@ import type { Role } from "./shared";
 import type { ViewKey } from "./types";
 
 function MpAppInner() {
-  const { session, hydrated, api, setSession } = useAuth();
+  const { session, hydrated, api, setSession, logout } = useAuth();
 
   if (!hydrated) {
     return (
@@ -28,8 +30,21 @@ function MpAppInner() {
   if (!session) return <LoginPage />;
 
   if (session.user.role === "CONSULTANT" && session.user.status === "PENDING_MANAGER") {
+    // Consultant ayant déjà choisi son manager → écran d'attente d'approbation
+    if (session.user.managerId) {
+      return (
+        <PendingApprovalScreen
+          api={api}
+          session={session}
+          onSession={setSession}
+          onLogout={logout}
+        />
+      );
+    }
+    // Consultant n'ayant pas encore choisi son manager (legacy first-visit)
     return <FirstVisitManagerSelection api={api} session={session} onSession={setSession} />;
   }
+
 
   const allViews = useMemo<Array<ShellViewMeta & { roles: Role[] }>>(() => [
     {
@@ -59,6 +74,13 @@ function MpAppInner() {
       subtitle: "Gestion documentaire, ingestion, revue",
       roles: ["MANAGER", "SUPER_ADMIN", "AUDITOR"],
       content: <KnowledgeBaseAdmin api={api} session={session} />,
+    },
+    {
+      key: "approvals",
+      title: "Approbations",
+      subtitle: "Valider les nouveaux consultants rattachés à votre périmètre",
+      roles: ["MANAGER", "SUPER_ADMIN"],
+      content: <ConsultantApprovals api={api} />,
     },
     {
       key: "users",

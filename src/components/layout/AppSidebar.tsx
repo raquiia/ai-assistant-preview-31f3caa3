@@ -9,9 +9,10 @@ import {
   MessageSquareText,
   ShieldCheck,
   Sparkles,
+  UserCheck,
   Users,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Sidebar,
   SidebarContent,
@@ -37,6 +38,7 @@ interface NavItem {
   icon: typeof Bot;
   roles: Role[];
   group: "work" | "admin";
+  badgeKey?: "approvals";
 }
 
 const NAV: NavItem[] = [
@@ -44,11 +46,13 @@ const NAV: NavItem[] = [
   { key: "history", label: "Historique", icon: History, roles: ["MANAGER", "SUPER_ADMIN", "AUDITOR"], group: "work" },
   { key: "dashboard", label: "Dashboard", icon: Gauge, roles: ["MANAGER", "SUPER_ADMIN", "AUDITOR"], group: "work" },
   { key: "kb", label: "Knowledge Base", icon: Database, roles: ["MANAGER", "SUPER_ADMIN", "AUDITOR"], group: "work" },
+  { key: "approvals", label: "Approbations", icon: UserCheck, roles: ["MANAGER", "SUPER_ADMIN"], group: "admin", badgeKey: "approvals" },
   { key: "users", label: "Utilisateurs", icon: Users, roles: ["SUPER_ADMIN"], group: "admin" },
   { key: "prompts", label: "Prompts & modèles", icon: KeyRound, roles: ["SUPER_ADMIN"], group: "admin" },
   { key: "audit", label: "Audit", icon: ShieldCheck, roles: ["SUPER_ADMIN", "AUDITOR"], group: "admin" },
   { key: "embed", label: "Embed", icon: ClipboardCheck, roles: ["SUPER_ADMIN"], group: "admin" },
 ];
+
 
 function roleLabel(role: Role): string {
   switch (role) {
@@ -64,9 +68,10 @@ function initials(name: string): string {
 }
 
 export function AppSidebar({ view, onChangeView }: { view: ViewKey; onChangeView: (v: ViewKey) => void }) {
-  const { session, logout } = useAuth();
+  const { session, logout, api } = useAuth();
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
+  const [pendingApprovals, setPendingApprovals] = useState(0);
 
   const items = useMemo(
     () => (session ? NAV.filter((n) => n.roles.includes(session.user.role)) : []),
@@ -75,7 +80,33 @@ export function AppSidebar({ view, onChangeView }: { view: ViewKey; onChangeView
   const workItems = items.filter((i) => i.group === "work");
   const adminItems = items.filter((i) => i.group === "admin");
 
+  useEffect(() => {
+    if (!session) return;
+    if (!(session.user.role === "MANAGER" || session.user.role === "SUPER_ADMIN")) return;
+    let cancelled = false;
+    const fetchCount = () => {
+      api
+        .get<{ count: number }>("/notifications/pending-count")
+        .then((p) => {
+          if (!cancelled) setPendingApprovals(p?.count ?? 0);
+        })
+        .catch(() => undefined);
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 20_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [api, session, view]);
+
   if (!session) return null;
+
+  const badgeFor = (item: NavItem): number => {
+    if (item.badgeKey === "approvals") return pendingApprovals;
+    return 0;
+  };
+
 
   return (
     <Sidebar collapsible="icon" className="border-r">
@@ -101,6 +132,7 @@ export function AppSidebar({ view, onChangeView }: { view: ViewKey; onChangeView
               {workItems.map((item) => {
                 const Icon = item.icon;
                 const active = view === item.key;
+                const count = badgeFor(item);
                 return (
                   <SidebarMenuItem key={item.key}>
                     <SidebarMenuButton
@@ -110,11 +142,20 @@ export function AppSidebar({ view, onChangeView }: { view: ViewKey; onChangeView
                       className="data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:font-semibold"
                     >
                       <Icon className="size-4" />
-                      <span>{item.label}</span>
+                      <span className="flex-1">{item.label}</span>
+                      {count > 0 && !collapsed && (
+                        <Badge className="ml-auto h-5 min-w-5 justify-center bg-destructive px-1.5 text-[10px] text-destructive-foreground">
+                          {count}
+                        </Badge>
+                      )}
+                      {count > 0 && collapsed && (
+                        <span className="absolute right-1 top-1 size-2 rounded-full bg-destructive" />
+                      )}
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 );
               })}
+
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -127,6 +168,7 @@ export function AppSidebar({ view, onChangeView }: { view: ViewKey; onChangeView
                 {adminItems.map((item) => {
                   const Icon = item.icon;
                   const active = view === item.key;
+                  const count = badgeFor(item);
                   return (
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
@@ -136,11 +178,20 @@ export function AppSidebar({ view, onChangeView }: { view: ViewKey; onChangeView
                         className="data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:font-semibold"
                       >
                         <Icon className="size-4" />
-                        <span>{item.label}</span>
+                        <span className="flex-1">{item.label}</span>
+                        {count > 0 && !collapsed && (
+                          <Badge className="ml-auto h-5 min-w-5 justify-center bg-destructive px-1.5 text-[10px] text-destructive-foreground">
+                            {count}
+                          </Badge>
+                        )}
+                        {count > 0 && collapsed && (
+                          <span className="absolute right-1 top-1 size-2 rounded-full bg-destructive" />
+                        )}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
                 })}
+
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
