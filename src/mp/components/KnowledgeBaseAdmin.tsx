@@ -1,7 +1,7 @@
-import { FileText, RefreshCcw, ShieldCheck, UploadCloud } from "lucide-react";
+import { FileText, Pencil, RefreshCcw, ShieldCheck, Tag, UploadCloud } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { DocumentRecord } from "../shared";
-import { labelForIndustry, labelForPmDomain } from "../shared";
+import { INDUSTRIES, PM_DOMAINS, labelForIndustry, labelForPmDomain } from "../shared";
 import type { ApiClient } from "../api";
 import type { Session } from "../types";
 import { AdminLayout } from "./AdminLayout";
@@ -11,6 +11,9 @@ import { UploadPanel } from "./UploadPanel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 
 interface DocumentDetail {
@@ -81,6 +84,13 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
     if (!selected || session.user.role !== "SUPER_ADMIN") return;
     await api.post(`/admin/kb/documents/${selected.document.id}/reindex`, {});
     toast.success("Réindexation lancée");
+  }
+
+  async function updateTags(documentId: string, industryTags: string[], pmDomainTags: string[]) {
+    if (session.user.role !== "SUPER_ADMIN") return;
+    await api.patch(`/admin/kb/documents/${documentId}`, { industryTags, pmDomainTags });
+    toast.success("Tags mis à jour");
+    await refresh();
   }
 
   return (
@@ -156,26 +166,26 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
                 {
                   key: "tags",
                   header: "Tags",
-                  render: (row) => {
-                    const tags = [
-                      ...(row.industryTags ?? []).map((t) => ({ k: `i-${t}`, label: labelForIndustry(t), kind: "i" as const })),
-                      ...(row.pmDomainTags ?? []).map((t) => ({ k: `d-${t}`, label: labelForPmDomain(t), kind: "d" as const })),
-                    ];
-                    if (tags.length === 0) return <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">Générique</span>;
-                    return (
-                      <div className="flex flex-wrap gap-1">
-                        {tags.slice(0, 3).map((t) => (
-                          <span
-                            key={t.k}
-                            className={`rounded-full px-1.5 py-0.5 text-[9px] font-medium ${t.kind === "i" ? "border border-primary/20 bg-primary/5 text-primary" : "border border-muted-foreground/20 bg-muted/60 text-muted-foreground"}`}
-                          >
-                            {t.label}
-                          </span>
-                        ))}
-                        {tags.length > 3 && <span className="text-[10px] text-muted-foreground">+{tags.length - 3}</span>}
+                  render: (row) => (
+                    <div className="flex items-center gap-1.5">
+                      <div className="min-w-0 flex-1">
+                        <TagList
+                          industryTags={row.industryTags ?? []}
+                          pmDomainTags={row.pmDomainTags ?? []}
+                          max={3}
+                        />
                       </div>
-                    );
-                  },
+                      {session.user.role === "SUPER_ADMIN" && (
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <TagEditor
+                            industryTags={row.industryTags ?? []}
+                            pmDomainTags={row.pmDomainTags ?? []}
+                            onSave={(ind, dom) => updateTags(row.id, ind, dom)}
+                          />
+                        </span>
+                      )}
+                    </div>
+                  ),
                 },
                 {
                   key: "status",
@@ -223,6 +233,25 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
                     {selected.chunks.length} chunk(s)
                   </span>
                 </div>
+              </div>
+
+              <div className="rounded-xl border border-border/50 bg-muted/40 p-4 text-sm text-foreground/80">
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Tags
+                  </p>
+                  {session.user.role === "SUPER_ADMIN" && (
+                    <TagEditor
+                      industryTags={selected.document.industryTags ?? []}
+                      pmDomainTags={selected.document.pmDomainTags ?? []}
+                      onSave={(ind, dom) => updateTags(selected.document.id, ind, dom)}
+                    />
+                  )}
+                </div>
+                <TagList
+                  industryTags={selected.document.industryTags ?? []}
+                  pmDomainTags={selected.document.pmDomainTags ?? []}
+                />
               </div>
 
               <div className="rounded-xl border border-border/50 bg-muted/40 p-4 text-sm text-foreground/80">
@@ -289,5 +318,161 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
         </aside>
       </div>
     </AdminLayout>
+  );
+}
+
+function TagList({
+  industryTags,
+  pmDomainTags,
+  max,
+}: {
+  industryTags: string[];
+  pmDomainTags: string[];
+  max?: number;
+}) {
+  const tags = [
+    ...industryTags.map((t) => ({ k: `i-${t}`, label: labelForIndustry(t), kind: "i" as const })),
+    ...pmDomainTags.map((t) => ({ k: `d-${t}`, label: labelForPmDomain(t), kind: "d" as const })),
+  ];
+  if (tags.length === 0) {
+    return (
+      <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">
+        Générique
+      </span>
+    );
+  }
+  const shown = max ? tags.slice(0, max) : tags;
+  const hidden = max ? tags.length - shown.length : 0;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {shown.map((t) => (
+        <span
+          key={t.k}
+          className={`rounded-full px-1.5 py-0.5 text-[9px] font-medium ${
+            t.kind === "i"
+              ? "border border-primary/20 bg-primary/5 text-primary"
+              : "border border-muted-foreground/20 bg-muted/60 text-muted-foreground"
+          }`}
+        >
+          {t.label}
+        </span>
+      ))}
+      {hidden > 0 && (
+        <span className="text-[10px] text-muted-foreground">+{hidden}</span>
+      )}
+    </div>
+  );
+}
+
+function TagEditor({
+  industryTags,
+  pmDomainTags,
+  onSave,
+}: {
+  industryTags: string[];
+  pmDomainTags: string[];
+  onSave: (industryTags: string[], pmDomainTags: string[]) => void | Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [ind, setInd] = useState<string[]>(industryTags);
+  const [dom, setDom] = useState<string[]>(pmDomainTags);
+
+  useEffect(() => {
+    if (open) {
+      setInd(industryTags);
+      setDom(pmDomainTags);
+    }
+  }, [open, industryTags, pmDomainTags]);
+
+  function toggle(list: string[], setList: (v: string[]) => void, value: string) {
+    setList(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
+  }
+
+  async function save() {
+    await onSave(ind, dom);
+    setOpen(false);
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+          title="Modifier les tags"
+        >
+          <Pencil className="size-3" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-80 p-0" align="end">
+        <div className="flex items-center justify-between border-b px-3 py-2">
+          <p className="text-xs font-semibold">
+            <Tag className="mr-1 inline size-3" /> Tags du document
+          </p>
+          <button
+            onClick={() => {
+              setInd([]);
+              setDom([]);
+            }}
+            className="text-[10px] text-muted-foreground hover:text-foreground"
+          >
+            Tout effacer
+          </button>
+        </div>
+        <ScrollArea className="max-h-80">
+          <div className="space-y-3 p-3">
+            <div>
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Secteurs
+              </p>
+              <div className="grid grid-cols-2 gap-1">
+                {INDUSTRIES.map((opt) => (
+                  <label
+                    key={opt.value}
+                    className="flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 text-[11px] hover:bg-muted/60"
+                  >
+                    <Checkbox
+                      checked={ind.includes(opt.value)}
+                      onCheckedChange={() => toggle(ind, setInd, opt.value)}
+                      className="size-3.5"
+                    />
+                    <span className="truncate">{labelForIndustry(opt.value)}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Domaines PM
+              </p>
+              <div className="grid grid-cols-2 gap-1">
+                {PM_DOMAINS.map((opt) => (
+                  <label
+                    key={opt.value}
+                    className="flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 text-[11px] hover:bg-muted/60"
+                  >
+                    <Checkbox
+                      checked={dom.includes(opt.value)}
+                      onCheckedChange={() => toggle(dom, setDom, opt.value)}
+                      className="size-3.5"
+                    />
+                    <span className="truncate">{labelForPmDomain(opt.value)}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        </ScrollArea>
+        <div className="flex justify-end gap-2 border-t px-3 py-2">
+          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setOpen(false)}>
+            Annuler
+          </Button>
+          <Button size="sm" className="h-7 text-xs" onClick={() => void save()}>
+            Enregistrer
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
