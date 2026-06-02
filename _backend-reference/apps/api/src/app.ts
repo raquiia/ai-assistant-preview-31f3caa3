@@ -476,8 +476,7 @@ export async function buildApp() {
     return chat.retryFallback(request.actor!, id);
   });
 
-  app.post("/admin/kb/upload", { preHandler: authPre }, async (request, reply) => {
-    if (!canUploadKnowledge(request.actor!)) return reply.code(403).send({ error: "Access denied" });
+  app.post("/admin/kb/upload", { preHandler: [authPre, requireRole("SUPER_ADMIN")] }, async (request, reply) => {
     if (request.isMultipart()) {
       const file = await request.file();
       if (!file) return reply.code(400).send({ error: "Missing file" });
@@ -495,26 +494,23 @@ export async function buildApp() {
     return chat.ingestKnowledge(request.actor!, { title: body.title, text: body.text ?? "", mimeType: body.mimeType });
   });
 
-  app.get("/admin/kb/documents", { preHandler: authPre }, async (request, reply) => {
-    if (!canUploadKnowledge(request.actor!) && !canViewAudit(request.actor!)) return reply.code(403).send({ error: "Access denied" });
+  app.get("/admin/kb/documents", { preHandler: [authPre, requireRole("SUPER_ADMIN", "MANAGER", "AUDITOR")] }, async () => {
     return { documents: repo.state.documents };
   });
 
-  app.get("/admin/kb/documents/:id", { preHandler: authPre }, async (request, reply) => {
+  app.get("/admin/kb/documents/:id", { preHandler: [authPre, requireRole("SUPER_ADMIN", "MANAGER", "AUDITOR")] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const document = repo.state.documents.find((item) => item.id === id);
     if (!document) return reply.code(404).send({ error: "Document not found" });
     return { document, chunks: repo.state.chunks.filter((chunk) => chunk.documentId === id) };
   });
 
-  app.post("/admin/kb/documents/:id/reindex", { preHandler: authPre }, async (request, reply) => {
-    if (request.actor!.role !== "SUPER_ADMIN") return reply.code(403).send({ error: "Access denied" });
+  app.post("/admin/kb/documents/:id/reindex", { preHandler: [authPre, requireRole("SUPER_ADMIN")] }, async () => {
     await repo.retriever.indexAll();
     return { ok: true };
   });
 
-  app.post("/admin/kb/documents/:id/publish", { preHandler: authPre }, async (request, reply) => {
-    if (request.actor!.role !== "SUPER_ADMIN") return reply.code(403).send({ error: "Access denied" });
+  app.post("/admin/kb/documents/:id/publish", { preHandler: [authPre, requireRole("SUPER_ADMIN")] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const document = repo.state.documents.find((item) => item.id === id);
     if (!document) return reply.code(404).send({ error: "Document not found" });
