@@ -224,23 +224,29 @@ model KnowledgeCorrection {
 }
 
 model Document {
-  id        String         @id @default(cuid())
-  title     String
-  ownerId   String
-  owner     User           @relation(fields: [ownerId], references: [id])
-  objectKey String
-  mimeType  String
-  status    DocumentStatus @default(UPLOADED)
-  version   Int            @default(1)
-  checksum  String
-  language  String
-  createdAt DateTime       @default(now())
-  chunks    DocumentChunk[]
+  id                   String         @id @default(cuid())
+  title                String
+  ownerId              String
+  owner                User           @relation(fields: [ownerId], references: [id])
+  objectKey            String
+  mimeType             String
+  status               DocumentStatus @default(UPLOADED)
+  version              Int            @default(1)
+  checksum             String
+  language             String
+  externalJobId        String?        @unique
+  extractionEngine     String?
+  extractionConfidence Float?
+  extractionWarnings   String[]       @default([])
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  chunks               DocumentChunk[]
 
   @@unique([objectKey, version])
   @@index([status])
   @@index([language])
   @@index([checksum])
+  @@index([externalJobId])
 }
 
 model DocumentChunk {
