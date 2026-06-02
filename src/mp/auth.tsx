@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ApiClient } from "./api";
+import { authProvider } from "./auth/index";
 import type { Session } from "./types";
 
 interface AuthContextValue {
@@ -37,7 +38,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const api = useMemo(() => new ApiClient(() => session), [session]);
 
   return (
-    <AuthContext.Provider value={{ session, hydrated, api, setSession, logout: () => setSession(null) }}>
+  const logout = () => {
+    void authProvider.signOut(session);
+    setSession(null);
+  };
+
+  return (
+    <AuthContext.Provider value={{ session, hydrated, api, setSession, logout }}>
       {children}
     </AuthContext.Provider>
   );
