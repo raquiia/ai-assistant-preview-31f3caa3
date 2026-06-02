@@ -56,6 +56,12 @@ export interface DashboardPayload {
     latencyP50: number;
     latencyP95: number;
     estimatedCost: number;
+    satisfactionRate: number;
+    feedbackCount: number;
+    averageStars: number;
+    positiveCount: number;
+    neutralCount: number;
+    negativeCount: number;
   };
   metrics: Array<{ metricName: string; value: number; dimensionsJson: Record<string, unknown> }>;
 }
