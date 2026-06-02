@@ -1,3 +1,4 @@
+import "./globalPolyfill";
 import { CognitoAuthProvider } from "./cognitoProvider";
 import { LocalAuthProvider } from "./localProvider";
 import { AUTH_MODE, type AuthProvider } from "./providers";

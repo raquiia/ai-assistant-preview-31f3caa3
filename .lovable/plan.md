@@ -1,63 +1,64 @@
-# Plan — Vague 2 : Tracking coûts/tokens + budgets + Lambdas Cognito/Rotation
+# Plan — Vague 3 : Orchestration, observabilité fine, rate-limit & billing
 
-> Vague 1 (`DEPLOYMENT_WAVE1.md`) livrée : Cognito + Secrets Manager + RAG Bedrock/AOSS opérationnels.
+> Vagues 1 & 2 livrées. Cette vague durcit la prod : orchestration, traçage, garde-fous techniques, et facturation client.
 
 ## Objectif
 
-Donner à la plateforme un **contrôle financier et opérationnel** :
-- chaque appel IA est compté (tokens + USD) et tracé en DB + CloudWatch ;
-- les utilisateurs/rôles/orgs ont un budget mensuel avec alerte 80 % et coupe-circuit 100 % ;
-- les rôles Cognito sont resyncés automatiquement (Lambda PostAuthentication) ;
-- les clés IA peuvent être rotatées via Secrets Manager (Lambda dédié).
+- Sortir les jobs RAG lourds du worker monolithique → **Step Functions** avec retry + DLQ + UI console.
+- **X-Ray** sur chaque requête `/chat` et `/admin/kb/*` pour debug end-to-end.
+- **Rate-limit tokens/min** par `(user, model)` (token-bucket Redis ou mémoire) + **quotas par modèle/rôle**.
+- **Export quotidien des UsageEvent vers Stripe** (metered billing) pour facturer les orgs clientes.
 
-Compatible local : sans `AWS_REGION` les métriques sont no-op, sans règle `Budget` ni env `BUDGET_DEFAULT_*_USD` le guard laisse passer.
-
----
-
-## Lot A — Comptabilité (UsageEvent + CloudWatch)
-
-- `services/pricing.ts` : table tarifaire par `provider:model` (Bedrock Titan/Cohere/Claude, Mistral, OpenAI, Textract page, Transcribe minute, Tavily, SerpAPI). Overrides via `PRICING_OVERRIDES_JSON`.
-- `providers/aws/cloudwatch-metrics.ts` : `PutMetricData` namespace `MP/Usage`, dims `(provider, model, role, orgId, route)`.
-- `services/usageTrackingService.ts` : `record(cost, ctx)` → insère `UsageEvent` + publie métriques en parallèle ; expose `costSince()` / `tokensSince()`.
-- Migration SQL `wave2_usage_budgets.sql` : table `UsageEvent` + index `(userId, createdAt)`, `(orgId, createdAt)`, `(route, createdAt)`.
-
-## Lot B — Budgets + coupe-circuit
-
-- `services/budgetService.ts` : résolution règle (user → role → org → env), fenêtre mensuelle UTC, statut `ok | warn | blocked`, `BudgetExceededError` (HTTP 402).
-- `middleware/budgetGuard.ts` : preHandler Fastify ; bloque avec 402 + body structuré, ou pose un header `X-Budget-Warning` à 80 %.
-- Table `Budget` (scope user/role/org/global) avec partial unique indexes.
-- `/me` renvoie `{ user, budget }` pour que l'UI affiche la jauge.
-
-## Lot C — Lambdas AWS
-
-- `apps/lambda/cognito-post-auth/` : déclenchée par Cognito PostAuthentication/PostConfirmation, POST signé HMAC vers `/api/public/webhooks/cognito/sync` qui resync `User.role`.
-- `apps/lambda/secrets-rotation/` : implémente le contrat 4-steps Secrets Manager (`createSecret`, `setSecret`, `testSecret`, `finishSecret`). Pour clés IA, `AWSPENDING` est écrit par la UI SuperAdmin ; le Lambda valide + promeut en `AWSCURRENT`.
+Rétro-compat : sans `INGESTION_STATE_MACHINE_ARN`/`AWS_XRAY_DAEMON_ADDRESS`/`REDIS_URL`/`STRIPE_SECRET_KEY`, tout dégrade vers le comportement Vague 2.
 
 ---
 
-## Fichiers créés / modifiés
+## Lot A — Step Functions ingestion lourde
 
-### Créés (`_backend-reference/`)
-- `apps/api/src/services/pricing.ts`
-- `apps/api/src/services/usageTrackingService.ts`
-- `apps/api/src/services/budgetService.ts`
-- `apps/api/src/middleware/budgetGuard.ts`
-- `apps/api/src/providers/aws/cloudwatch-metrics.ts`
-- `apps/lambda/cognito-post-auth/index.ts`
-- `apps/lambda/secrets-rotation/index.ts`
-- `prisma/migrations/wave2_usage_budgets.sql`
-- `DEPLOYMENT_WAVE2.md`
+- `infra/aws/stepfunctions/ingestion.asl.json` : ASL `Classify → Route → (Extract sync | Textract waitForTaskToken | Transcribe waitForTaskToken) → Chunk → EmbedBatches (Map MaxConcurrency=4, retry sur BedrockThrottling) → IndexBulk → MarkPublished`. Catch global → `MarkFailed`.
+- `apps/worker/src/providers/aws/stepfunctions-ingestion.ts` : `startIngestionExecution()` + `shouldUseStepFunctions(mime, size)` (audio/vidéo, images, PDF > 5 Mo).
+- Le worker SQS Vague 1 reste actif pour les jobs « light » ; le routage se fait par taille/MIME.
+- Terraform : `aws_sfn_state_machine` + 6 Lambdas (classify/extract/chunk/embed/index/update-status) + SNS topic + rôle Textract.
 
-### À câbler dans `apps/api/src/app.ts` (extraits dans `DEPLOYMENT_WAVE2.md` §3)
-- preHandler `budgetGuard` sur `/chat`, `/admin/kb/*`, `/search`.
-- appel `usage.record()` après chaque opération IA (chat, embed, OCR, transcribe, search).
-- handler `/api/public/webhooks/cognito/sync` (HMAC verify + role sync).
-- `/me` retournant le budget courant.
+## Lot B — X-Ray
 
-### Frontend (futur, Vague 2bis)
-- Jauge budget dans `Topbar.tsx` (lit `/me.budget`).
-- Toast 80 % / écran 402 avec lien support dans `ChatView.tsx`.
-- Section « Budgets » dans `SuperAdminPanel.tsx` (CRUD `Budget`).
+- `apps/api/src/providers/aws/xray.ts` : `traceAsync()`, `captureAwsClient()`, `xrayFastifyHook()`. Activé uniquement quand `AWS_XRAY_DAEMON_ADDRESS` set.
+- Sampling 100 % `/chat`, 50 % `/admin/kb/*`, 10 % autres.
+- Annotations injectées : `requestId`, `route`, `model`, `documentId`.
+- IAM : `xray:PutTraceSegments`, `xray:PutTelemetryRecords` sur le task role.
+
+## Lot C — Rate-limit + quotas modèles
+
+- `services/rateLimitService.ts` : token-bucket par `(userId, providerModel)`, defaults par modèle, override env `RATE_LIMIT_*`. Repos `InMemoryRateLimitRepo` (dev) et Lua atomique Redis (prod).
+- `services/modelPolicy.ts` : whitelist par rôle (wildcards `*`), override `MODEL_POLICY_JSON`. `assertAllowed()` levé en 403 dans `chatService`.
+- `/chat` ajoute : check `assertAllowed()`, puis `rateLimit.tryConsume(estimateTokens(prompt))` → 429 si refusé.
+- `/me/models` (nouveau) expose `allowedModels(role)` pour pré-filtrer le sélecteur UI.
+
+## Lot D — Export billing Stripe
+
+- `services/stripeBillingExporter.ts` : agrège `UsageEvent` du jour J-1 par `(orgId, meter)`, push `subscription_items.createUsageRecord` avec idempotency key `mp-usage-{orgId}-{meter}-{YYYYMMDD}`.
+- Compteurs : `chat-tokens`, `embed-tokens`, `ocr-pages`, `transcribe-minutes`.
+- `apps/lambda/billing-export/index.ts` : invoqué via EventBridge `cron(0 2 * * ? *)`.
+- Table `OrgBilling(orgId, stripeCustomerId, subItem* per meter)`.
+- Secret `mp/stripe/secret` dans Secrets Manager.
+
+---
+
+## Fichiers créés (`_backend-reference/`)
+
+- `infra/aws/stepfunctions/ingestion.asl.json`
+- `apps/worker/src/providers/aws/stepfunctions-ingestion.ts`
+- `apps/api/src/providers/aws/xray.ts`
+- `apps/api/src/services/rateLimitService.ts`
+- `apps/api/src/services/modelPolicy.ts`
+- `apps/api/src/services/stripeBillingExporter.ts`
+- `apps/lambda/billing-export/index.ts`
+- `DEPLOYMENT_WAVE3.md`
+
+## À câbler (extraits dans `DEPLOYMENT_WAVE3.md`)
+
+- `app.ts` : hook X-Ray, `assertAllowed` + `rateLimit.tryConsume` dans `/chat`, route `/me/models`, refactor `/admin/kb/upload` pour invoquer Step Functions sur jobs lourds.
+- Frontend (Vague 3bis) : sélecteur modèles filtré par `/me/models`, toast 429 « ralentissez », badge trace-id copiable en footer chat.
 
 ---
 
@@ -65,27 +66,28 @@ Compatible local : sans `AWS_REGION` les métriques sont no-op, sans règle `Bud
 
 | # | Test | Critère |
 |---|---|---|
-| 1 | 1 chat consultant | `UsageEvent` en DB + métrique `CostUsd` visible CloudWatch < 1 min |
-| 2 | Régler `Budget.monthlyUsd=0.01` → relancer chat | HTTP 402 `{error:"budget_exceeded"}` |
-| 3 | Approcher 85 % du budget | HTTP 200 + header `X-Budget-Warning` |
-| 4 | Changer le groupe Cognito d'un user → relogin | `User.role` en DB synchronisé sans intervention |
-| 5 | Rotation Mistral via SuperAdmin | Lambda promeut `AWSPENDING` → `AWSCURRENT`, chat utilise la nouvelle clé sous 5 min (TTL cache `aiProviderService`) |
+| 1 | Upload PDF scanné 20 Mo | Step Functions affiche le flow complet jusqu'à `MarkPublished` |
+| 2 | Spam 200 chats/min | 429 `rate_limited` après burst |
+| 3 | Consultant tente Claude Opus | 403 `model_not_allowed` |
+| 4 | Console X-Ray | Service map API → Bedrock → AOSS avec latences |
+| 5 | Lambda billing déclenché manuellement | Stripe Dashboard montre les usage records ; re-run = no-op idempotent |
 
 ---
 
-## Hors scope (Vague 3)
+## Hors scope (Vague 4)
 
-- Rate-limit tokens/min (complément du budget mensuel)
-- Step Functions orchestration ingestion lourde
-- X-Ray instrumentation bout-en-bout
-- Multi-tenant billing exports (Stripe)
-- Quotas par modèle (interdire Claude Opus aux consultants)
+- Cache résultats LLM (prompts identiques cross-user)
+- A/B testing modèles
+- Anonymisation PII avant Bedrock (Macie / Comprehend PII)
+- Multi-region failover (us-east-1 → eu-west-1)
+- Auto-scaling AOSS OCU sur charge
 
 ## Estimation effort
 
-- Lot A : ~0.5 jour
+- Lot A : ~1.5 jour (ASL + 6 Lambdas + Terraform SFN)
 - Lot B : ~0.5 jour
-- Lot C (2 Lambdas + Terraform) : ~0.5 jour
-- Câblage `app.ts` + tests + doc : ~0.5 jour
+- Lot C : ~0.5 jour
+- Lot D : ~0.5 jour
+- Doc + tests : ~0.5 jour
 
-**Total : ~2 jours.**
+**Total : ~3.5 jours.**
