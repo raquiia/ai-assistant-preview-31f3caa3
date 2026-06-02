@@ -113,3 +113,35 @@ The `/me/usage` endpoint should also surface `cacheHitRate` so the Usage Dashboa
 - **6.C** — KB hybrid search (BM25 + kNN) + reindex SFN
 - **6.F** — Sentry front + traceId propagation
 - **6.G** — `/healthz` + ECS auto-scaling `min=2/max=20`
+
+---
+
+## Wave 6.D — Streaming SSE chat (IMPLÉMENTÉ côté front, mock)
+
+**Endpoint à exposer côté Fastify** :
+`POST /chat/conversations/:id/messages/stream` → `text/event-stream`
+
+Frames émises (voir `_backend-reference/apps/api/src/routes/chat.stream.ts`) :
+- `event: start`   `data: { conversationId }`
+- `event: sources` `data: { sources: SourceCitation[] }`
+- `event: token`   `data: { delta: string }`
+- `event: done`    `data: ChatAnswerPayload`
+- `event: error`   `data: { message: string }`
+- comment `: ping` toutes les 15 s (heartbeat anti-timeout ALB).
+
+**Front** : `ApiClient.streamChat()` (`src/mp/api.ts`) parse ce flux et émet
+des `StreamEvent` consommés par `ChatShell.send()`. En mode `VITE_USE_MOCKS=true`,
+le client simule le stream à ~12 ms/token à partir de `buildAnswerForStream`.
+
+**Infra AWS — points critiques** :
+- ALB : `idle_timeout = 120s` minimum, désactiver compression sur `text/event-stream`.
+- CloudFront (si exposé) : whitelister header `Accept`, désactiver le cache sur
+  `/chat/*/messages/stream`, `Origin Read Timeout = 60s`.
+- ECS task : `responseTimeout` Fastify augmenté à 120 s pour ces routes.
+- Cache LLM (Wave 6.E) : sur HIT, on émet un seul `token` avec l'answer complète
+  pour conserver le contrat SSE.
+
+**UX livré côté front** :
+- Bulle assistant qui se remplit progressivement (caret clignotant).
+- Bouton Stop (AbortController) qui interrompt le flux côté client.
+- Sources rendues dès `event: sources` (rail latéral live).
