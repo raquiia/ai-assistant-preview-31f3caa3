@@ -15,7 +15,7 @@ import {
   UserRound,
   Users,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { branding } from "./branding";
 import type { Role } from "./shared";
 import { ApiClient } from "./api";
@@ -45,19 +45,20 @@ const nav: Array<{ key: ViewKey; label: string; icon: typeof Bot; roles: Role[] 
 const SESSION_KEY = "mp-session";
 const NAV_KEY = "mp-nav-collapsed";
 
-function readStoredSession(): Session | null {
-  if (typeof window === "undefined") return null;
-  const stored = window.localStorage.getItem(SESSION_KEY);
-  return stored ? (JSON.parse(stored) as Session) : null;
-}
 
 export function MpApp() {
-  const [session, setSession] = useState<Session | null>(readStoredSession);
-  const [navCollapsed, setNavCollapsed] = useState(() =>
-    typeof window !== "undefined" && window.localStorage.getItem(NAV_KEY) === "true",
-  );
+  const [hydrated, setHydrated] = useState(false);
+  const [session, setSession] = useState<Session | null>(null);
+  const [navCollapsed, setNavCollapsed] = useState(false);
   const [view, setView] = useState<ViewKey>("chat");
   const api = useMemo(() => new ApiClient(() => session), [session]);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(SESSION_KEY);
+    if (stored) setSession(JSON.parse(stored) as Session);
+    setNavCollapsed(window.localStorage.getItem(NAV_KEY) === "true");
+    setHydrated(true);
+  }, []);
 
   function handleSession(next: Session | null) {
     setSession(next);
@@ -66,6 +67,7 @@ export function MpApp() {
     else window.localStorage.removeItem(SESSION_KEY);
   }
 
+  if (!hydrated) return <div className="min-h-screen bg-slate-50" />;
   if (!session) return <LoginPage onLogin={handleSession} />;
 
   if (session.user.role === "CONSULTANT" && session.user.status === "PENDING_MANAGER") {
