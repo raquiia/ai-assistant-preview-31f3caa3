@@ -19,7 +19,7 @@ import { chunkDocument } from "@mp/rag";
 import { AppRepository } from "./state.js";
 import { EnvEncryptedSecretProvider } from "./security/secretProvider.js";
 import { signToken, verifyToken } from "./security/tokens.js";
-import { verifyDemoPassword } from "./security/passwords.js";
+import { hashPassword, verifyDemoPassword } from "./security/passwords.js";
 import { ChatService } from "./services/chatService.js";
 
 declare module "fastify" {
@@ -155,6 +155,154 @@ export async function buildApp() {
   app.get("/managers/active", { preHandler: auth(repo) }, async () => ({
     managers: repo.state.users.filter((user) => user.role === "MANAGER" && user.status === "ACTIVE")
   }));
+
+  // Self-registration: a consultant creates an account and selects a manager.
+  // The account is created in PENDING_MANAGER and waits for the manager to approve.
+  app.post("/auth/register", async (request, reply) => {
+    const body = request.body as {
+      email?: string;
+      password?: string;
+      name?: string;
+      managerId?: string;
+      department?: string | null;
+      language?: string;
+    };
+    if (!body.email || !body.password || !body.name || !body.managerId) {
+      return reply.code(400).send({ error: "email, password, name and managerId are required" });
+    }
+    if (body.password.length < 8) {
+      return reply.code(400).send({ error: "password must be at least 8 characters" });
+    }
+    if (repo.findUserByEmail(body.email)) {
+      return reply.code(409).send({ error: "email already in use" });
+    }
+    const manager = repo.state.users.find(
+      (user) => user.id === body.managerId && user.role === "MANAGER" && user.status === "ACTIVE"
+    );
+    if (!manager) return reply.code(404).send({ error: "Manager not found or inactive" });
+
+    const now = new Date().toISOString();
+    const user: User & { passwordHash?: string } = {
+      id: `usr-${crypto.randomUUID()}`,
+      email: body.email,
+      name: body.name,
+      role: "CONSULTANT",
+      managerId: manager.id,
+      language: body.language ?? "fr",
+      status: "PENDING_MANAGER",
+      department: body.department ?? manager.department ?? null,
+      createdAt: now,
+      updatedAt: now,
+      passwordHash: await hashPassword(body.password)
+    } as User & { passwordHash?: string };
+    repo.state.users.push(user);
+    repo.audit({
+      actorId: user.id,
+      action: "USER_REGISTERED",
+      entityType: "User",
+      entityId: user.id,
+      metadataJson: { managerId: manager.id, status: "PENDING_MANAGER" },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] ?? null
+    });
+    return {
+      user,
+      accessToken: signToken(user.id, "access", 60 * 60),
+      refreshToken: signToken(user.id, "refresh", 60 * 60 * 24 * 14)
+    };
+  });
+
+  // Manager approval workflow
+  app.get("/managers/me/pending-consultants", { preHandler: auth(repo) }, async (request, reply) => {
+    const actor = request.actor!;
+    if (actor.role !== "MANAGER" && actor.role !== "SUPER_ADMIN") {
+      return reply.code(403).send({ error: "Access denied" });
+    }
+    const pending = repo.state.users.filter(
+      (user) =>
+        user.role === "CONSULTANT" &&
+        user.status === "PENDING_MANAGER" &&
+        (actor.role === "SUPER_ADMIN" || user.managerId === actor.id)
+    );
+    return { consultants: pending };
+  });
+
+  app.post("/managers/consultants/:id/approve", { preHandler: auth(repo) }, async (request, reply) => {
+    const actor = request.actor!;
+    if (actor.role !== "MANAGER" && actor.role !== "SUPER_ADMIN") {
+      return reply.code(403).send({ error: "Access denied" });
+    }
+    const { id } = request.params as { id: string };
+    const target = repo.findUserById(id);
+    if (!target || target.role !== "CONSULTANT") {
+      return reply.code(404).send({ error: "Consultant not found" });
+    }
+    if (actor.role === "MANAGER" && target.managerId !== actor.id) {
+      return reply.code(403).send({ error: "Consultant is not attached to this manager" });
+    }
+    target.status = "ACTIVE";
+    target.updatedAt = new Date().toISOString();
+    repo.audit({
+      actorId: actor.id,
+      action: "CONSULTANT_APPROVED",
+      entityType: "User",
+      entityId: target.id,
+      metadataJson: { managerId: target.managerId },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] ?? null
+    });
+    return { user: target };
+  });
+
+  app.post("/managers/consultants/:id/reject", { preHandler: auth(repo) }, async (request, reply) => {
+    const actor = request.actor!;
+    if (actor.role !== "MANAGER" && actor.role !== "SUPER_ADMIN") {
+      return reply.code(403).send({ error: "Access denied" });
+    }
+    const { id } = request.params as { id: string };
+    const body = (request.body as { reason?: string } | undefined) ?? {};
+    const target = repo.findUserById(id);
+    if (!target || target.role !== "CONSULTANT") {
+      return reply.code(404).send({ error: "Consultant not found" });
+    }
+    if (actor.role === "MANAGER" && target.managerId !== actor.id) {
+      return reply.code(403).send({ error: "Consultant is not attached to this manager" });
+    }
+    target.status = "DISABLED";
+    target.updatedAt = new Date().toISOString();
+    repo.audit({
+      actorId: actor.id,
+      action: "CONSULTANT_REJECTED",
+      entityType: "User",
+      entityId: target.id,
+      metadataJson: { managerId: target.managerId, reason: body.reason ?? null },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] ?? null
+    });
+    return { user: target };
+  });
+
+  app.get("/notifications/pending-count", { preHandler: auth(repo) }, async (request) => {
+    const actor = request.actor!;
+    if (actor.role === "MANAGER") {
+      const count = repo.state.users.filter(
+        (user) =>
+          user.role === "CONSULTANT" &&
+          user.status === "PENDING_MANAGER" &&
+          user.managerId === actor.id
+      ).length;
+      return { pendingConsultants: count };
+    }
+    if (actor.role === "SUPER_ADMIN") {
+      const count = repo.state.users.filter(
+        (user) => user.role === "CONSULTANT" && user.status === "PENDING_MANAGER"
+      ).length;
+      return { pendingConsultants: count };
+    }
+    return { pendingConsultants: 0 };
+  });
+
+
 
   app.post("/chat/conversations", { preHandler: auth(repo) }, async (request) => {
     const body = request.body as { title?: string; language?: string; channel?: "WEB" | "EMBED" | "API" };
@@ -622,6 +770,54 @@ export async function buildApp() {
     return { provider: { ...config, encryptedApiKeyRef: config.encryptedApiKeyRef ? "stored" : null } };
   });
 
+  // Test connectivity / validity of a stored provider API key.
+  // Returns latency, currently reachable status, and a timestamp.
+  app.post("/superadmin/ai-providers/:id/test", { preHandler: auth(repo) }, async (request, reply) => {
+    if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
+    const { id } = request.params as { id: string };
+    const config = repo.state.providerConfigs.find((item) => item.id === id);
+    if (!config) return reply.code(404).send({ error: "Provider config not found" });
+
+    const startedAt = Date.now();
+    let ok = false;
+    let message: string | null = null;
+    try {
+      const apiKey = config.encryptedApiKeyRef ? await secrets.readSecret(config.encryptedApiKeyRef) : null;
+      if (!apiKey) {
+        message = "No API key configured";
+      } else if (config.provider === "openai") {
+        const res = await fetch("https://api.openai.com/v1/models", {
+          headers: { Authorization: `Bearer ${apiKey}` }
+        });
+        ok = res.ok;
+        if (!res.ok) message = `HTTP ${res.status}`;
+      } else if (config.provider === "mistral") {
+        const res = await fetch("https://api.mistral.ai/v1/models", {
+          headers: { Authorization: `Bearer ${apiKey}` }
+        });
+        ok = res.ok;
+        if (!res.ok) message = `HTTP ${res.status}`;
+      } else {
+        // search providers: assume ok if a key is stored
+        ok = true;
+      }
+    } catch (error) {
+      message = error instanceof Error ? error.message : "Unknown error";
+    }
+    const latencyMs = Date.now() - startedAt;
+    const checkedAt = new Date().toISOString();
+    repo.audit({
+      actorId: request.actor!.id,
+      action: "PROVIDER_TEST",
+      entityType: "AiProviderConfig",
+      entityId: config.id,
+      metadataJson: { ok, latencyMs, message },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] ?? null
+    });
+    return { ok, latencyMs, checkedAt, message };
+  });
+
   app.get("/superadmin/audit/events", { preHandler: auth(repo) }, async (request, reply) => {
     if (!canViewAudit(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     return { events: repo.state.auditEvents };
@@ -682,6 +878,16 @@ export async function buildApp() {
   return app;
 }
 
+// Routes that a PENDING_MANAGER user is still allowed to call (read-only,
+// session bootstrap + waiting-room workflow).
+const PENDING_MANAGER_ALLOWED = new Set<string>([
+  "/auth/me",
+  "/auth/logout",
+  "/auth/refresh",
+  "/managers/active",
+  "/notifications/pending-count"
+]);
+
 function auth(repo: AppRepository) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     try {
@@ -690,6 +896,9 @@ function auth(repo: AppRepository) {
       const payload = verifyToken(token, "access");
       const actor = repo.findUserById(payload.sub);
       if (!actor || actor.status === "DISABLED") throw new Error("Invalid user");
+      if (actor.status === "PENDING_MANAGER" && !PENDING_MANAGER_ALLOWED.has(request.routeOptions?.url ?? request.url)) {
+        return reply.code(403).send({ error: "Account pending manager approval" });
+      }
       request.actor = actor;
     } catch {
       return reply.code(401).send({ error: "Unauthorized" });

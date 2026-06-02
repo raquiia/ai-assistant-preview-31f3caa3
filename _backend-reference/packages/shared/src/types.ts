@@ -156,11 +156,41 @@ export interface RetrievalEvent {
   usedInAnswer: boolean;
 }
 
+export type PromptStatus = "DRAFT" | "REVIEW" | "APPROVED" | "ACTIVE" | "REJECTED";
+
+export interface FewShotExample {
+  id: string;
+  question: string;
+  answer: string;
+  notes?: string;
+}
+
+export interface PromptConfig {
+  tone?: "professional" | "friendly" | "concise" | "didactic";
+  sourcePolicy?: "use_internal_kb_first" | "internal_only" | "web_allowed";
+  webSearchEnabled?: boolean;
+  codeOfConduct?: string;
+  escalationPolicy?: string;
+  citationPolicy?: string;
+  languagePolicy?: string;
+  structurePolicy?: string;
+  fewShot?: FewShotExample[];
+  variables?: string[];
+  // Lifecycle / governance
+  status?: PromptStatus;
+  changelog?: string;
+  effectiveAt?: string | null;
+  targetRoles?: Role[];
+  targetDepartments?: string[];
+  canaryPercent?: number;
+  [key: string]: unknown;
+}
+
 export interface PromptVersion {
   id: string;
   name: string;
   content: string;
-  configJson: Record<string, unknown>;
+  configJson: PromptConfig;
   createdById: string;
   active: boolean;
   createdAt: string;
@@ -229,17 +259,51 @@ export interface ChatRequest {
 }
 
 export interface AppSettings {
+  // RAG
   topK: number;
   minRelevanceScore: number;
   qualityThreshold: number;
+  rerankerEnabled: boolean;
+  rerankerModel: string;
+  embeddingModel: string;
+  contextWindowTokens: number;
+  maxHistoryTurns: number;
+  webFallbackEnabled: boolean;
+  // Inference
   temperature: number;
+  topP: number;
   maxTokens: number;
+  presencePenalty: number;
+  frequencyPenalty: number;
+  seed: number | null;
+  stopSequences: string[];
+  streaming: boolean;
+  responseFormat: "text" | "json" | "structured";
+  timeoutMs: number;
   reasoningEffort: "minimal" | "low" | "medium" | "high";
   verbosity: "concise" | "balanced" | "detailed";
-  allowedEmbedOrigins: string[];
+  // Models
+  defaultModel: string;
+  fallbackModel: string;
+  fallbackTriggers: Array<"timeout" | "rate_limit" | "credit_exhausted" | "server_error">;
   mistralModel: string;
   openAiModel: string;
   searchProvider: "mock" | "openai_hosted" | "tavily" | "serpapi" | "none";
+  // Guardrails
+  forbiddenTopics: string[];
+  piiRedaction: boolean;
+  piiRedactionLevel: "standard" | "strict";
+  safetyThreshold: "low" | "medium" | "high";
+  refusalTemplate: string;
+  logUserMessagesPlaintext: boolean;
+  // Budgets & quotas
+  dailyTokenBudget: number;
+  monthlyCostCapEur: number;
+  requestsPerMinutePerUser: number;
+  budgetAlertThreshold: number;
+  allowedModelsByRole: Record<"CONSULTANT" | "MANAGER" | "SUPER_ADMIN" | "AUDITOR", string[]>;
+  // Embed
+  allowedEmbedOrigins: string[];
 }
 
 export interface DemoState {
