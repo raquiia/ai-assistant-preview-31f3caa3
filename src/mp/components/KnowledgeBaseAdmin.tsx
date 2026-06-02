@@ -42,6 +42,10 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
     "Le contrôle des coûts doit relier budget, forecast, reste à faire, risques et actions de mitigation.",
   );
   const [selected, setSelected] = useState<DocumentDetail | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [filterInd, setFilterInd] = useState<string[]>([]);
+  const [filterDom, setFilterDom] = useState<string[]>([]);
 
   async function refresh() {
     const payload = await api.get<{ documents: DocumentRecord[] }>("/admin/kb/documents");
