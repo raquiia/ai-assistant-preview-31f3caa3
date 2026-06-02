@@ -136,6 +136,7 @@ interface SyncExtractionResult {
   text?: string;
   async?: boolean;
   externalJobId?: string;
+  engine?: "textract" | "transcribe";
 }
 
 async function extractSync(job: IngestionJob, deps: IngestionDeps): Promise<SyncExtractionResult> {
@@ -164,7 +165,7 @@ async function extractSync(job: IngestionJob, deps: IngestionDeps): Promise<Sync
     if (deps.textract && deps.storage) {
       const bucket = process.env.S3_KNOWLEDGE_BUCKET!;
       const { jobId } = await deps.textract.startJob(bucket, job.objectKey, job.documentId);
-      return { async: true, externalJobId: jobId };
+      return { async: true, externalJobId: jobId, engine: "textract" };
     }
     return { text: "" };
   }
