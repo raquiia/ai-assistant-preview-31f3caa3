@@ -1,30 +1,40 @@
-import { FileUp } from "lucide-react";
+import { FileUp, Loader2 } from "lucide-react";
 import { useState } from "react";
 import type { ApiClient } from "../api";
+import { Button } from "@/components/ui/button";
 
 export function UploadPanel({ api, onUploaded }: { api: ApiClient; onUploaded?: () => void }) {
   const [status, setStatus] = useState<string>("");
+  const [busy, setBusy] = useState(false);
 
   async function upload(file: File | null) {
     if (!file) return;
-    setStatus("Upload...");
+    setBusy(true);
+    setStatus("Upload en cours…");
     const form = new FormData();
     form.append("file", file);
     try {
       await api.post("/admin/kb/upload", form);
-      setStatus("Document indexe");
+      setStatus("Document indexé");
       onUploaded?.();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Upload impossible");
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
-    <label className="flex cursor-pointer items-center gap-2 rounded-mp border border-dashed border-slate-300 bg-white px-3 py-2 text-sm text-slate-600 transition hover:border-mp-cyan hover:text-slate-800">
-      <FileUp size={17} className="text-mp-blue" />
-      <span className="hidden sm:inline">Upload</span>
-      <input className="hidden" type="file" onChange={(event) => upload(event.target.files?.[0] ?? null)} />
-      {status && <span className="ml-auto hidden max-w-40 truncate text-xs text-slate-400 sm:inline">{status}</span>}
-    </label>
+    <Button asChild variant="outline" size="sm" className="gap-2">
+      <label className="cursor-pointer">
+        {busy ? <Loader2 size={15} className="animate-spin" /> : <FileUp size={15} />}
+        <span>{status || "Upload fichier"}</span>
+        <input
+          className="hidden"
+          type="file"
+          onChange={(event) => upload(event.target.files?.[0] ?? null)}
+        />
+      </label>
+    </Button>
   );
 }
