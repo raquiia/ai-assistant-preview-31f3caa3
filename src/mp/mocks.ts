@@ -244,6 +244,50 @@ const auditEvents: AuditEvent[] = [
   },
 ];
 
+// Feedback consultants + commentaires admin persistent entre les appels.
+const historyFeedback: Record<
+  string,
+  Array<{ id: string; userId: string; userName: string; rating: string; comment?: string | null; createdAt: string }>
+> = {
+  "r-1": [
+    {
+      id: "fb-1",
+      userId: "u-consult",
+      userName: "Clara Consultante",
+      rating: "UP",
+      comment: "Réponse claire et structurée, j'ai pu la réutiliser telle quelle.",
+      createdAt: new Date().toISOString(),
+    },
+  ],
+  "r-2": [
+    {
+      id: "fb-2",
+      userId: "u-consult",
+      userName: "Clara Consultante",
+      rating: "DOWN",
+      comment: "Manque d'exemple concret sur un projet réel.",
+      createdAt: new Date().toISOString(),
+    },
+  ],
+  "r-3": [
+    {
+      id: "fb-3",
+      userId: "u-consult-2",
+      userName: "Lucas Consultant",
+      rating: "THREE",
+      comment: "Formule correcte mais aurait pu citer la source PMBOK.",
+      createdAt: new Date().toISOString(),
+    },
+  ],
+};
+
+const historyAdminComments: Record<
+  string,
+  Array<{ id: string; adminId: string; adminName: string; comment: string; status: string; createdAt: string }>
+> = {};
+
+
+
 function sessionFor(email: string): Session | null {
   const user = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
   if (!user) return null;
