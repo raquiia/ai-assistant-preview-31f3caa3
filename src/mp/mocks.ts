@@ -344,6 +344,45 @@ const providers: AiProviderConfig[] = [
   },
 ];
 
+interface ProviderHistoryEvent {
+  id: string;
+  action: "set" | "rotate" | "delete";
+  actorName: string;
+  at: string;
+  metadata?: Record<string, unknown>;
+}
+const providerHistory: Record<string, ProviderHistoryEvent[]> = {
+  mistral: [
+    {
+      id: "ph-1",
+      action: "set",
+      actorName: "Sophie Admin",
+      at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 14).toISOString(),
+    },
+    {
+      id: "ph-2",
+      action: "rotate",
+      actorName: "Sophie Admin",
+      at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(),
+    },
+  ],
+};
+
+function pushProviderHistory(
+  provider: string,
+  action: ProviderHistoryEvent["action"],
+  session: Session | null,
+) {
+  const list = providerHistory[provider] ?? (providerHistory[provider] = []);
+  list.unshift({
+    id: `ph-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    action,
+    actorName: session?.user.name ?? "Système",
+    at: new Date().toISOString(),
+  });
+}
+
+
 const appSettings: import("./shared").AppSettings = {
   topK: 6,
   minRelevanceScore: 0.65,
