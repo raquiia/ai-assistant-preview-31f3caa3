@@ -1,76 +1,118 @@
-# Audit du backend AWS vs features prévues et frontend
+# Rendre le backend AWS prêt à déployer et fonctionnel
 
-## Ce que j'ai constaté en explorant
+Choix retenus :
+- **Périmètre** : Infra Terraform complète + adaptateurs AWS dans le code applicatif.
+- **Infra** : Région `eu-west-3`, VPC `10.0.0.0/16`, RDS `db.t4g.medium` Multi-AZ, env `dev` seul, domaine TBD (CloudFront avec cert ACM créé conditionnellement).
+- **Code** : Garder l'in-memory comme fallback ; basculer sur Prisma quand `DATABASE_URL` est défini.
+- **Déploiement** : Script `deploy.sh` (build → push ECR → terraform apply → migrate).
 
-- Le frontend Lovable (`src/mp/**`) tourne sur **mocks** par défaut (`VITE_USE_MOCKS=true`) et tape sinon `VITE_API_URL` (Fastify).
-- Le "backend" cible vit dans `_backend-reference/` : monorepo TypeScript (Fastify API + worker + web + Prisma) avec un **squelette Terraform AWS** dans `_backend-reference/infra/aws/` (85 lignes de `main.tf`).
-- Les features livrées côté front couvrent : auth + RBAC, chat consultant avec RAG/fallback/escalade, KB (upload, publish, reindex, tags), historique Q/R + commentaires admin + corrections approuvées, gestion users, prompts versionnés + rollback, providers IA (Mistral primary / OpenAI fallback), embed iframe, audit/compliance, dashboard avec satisfaction.
+## Ce que je vais livrer
 
-## Verdict — le Terraform AWS n'est PAS aligné avec les features
+### 1. Infra Terraform complète (`_backend-reference/infra/aws/`)
 
-Le `main.tf` actuel ne déclare que : `KMS`, `S3 (knowledge)`, `SQS (ingestion)`, `Cognito user pool + groups`, `Secrets Manager (ai-provider-keys)`, `CloudWatch log groups api/worker`. Tout le reste est un commentaire `# Placeholders for VPC, ECS, RDS, OpenSearch`.
+Découpée en modules locaux dans des fichiers séparés pour rester lisible :
 
-Manques bloquants par rapport au produit :
+- `network.tf` : VPC `10.0.0.0/16` sur 3 AZ, subnets publics (ALB) + privés (ECS/RDS/AOSS), 1 NAT GW, route tables, **VPC endpoints** S3 (gateway), Secrets Manager, KMS, ECR API/DKR, CloudWatch Logs (interface).
+- `security.tf` : SG ALB, SG ECS api, SG ECS worker, SG RDS, SG AOSS, SG VPC endpoints. Règles least-privilege (ALB→ECS:4000, ECS→RDS:5432, ECS→AOSS:443).
+- `rds.tf` : `aws_db_subnet_group`, `aws_db_instance` Postgres 16 `db.t4g.medium` Multi-AZ, encryption KMS, backups 14j, deletion protection, parameter group avec `log_statement=ddl`. Master password stocké dans Secrets Manager.
+- `aoss.tf` : OpenSearch Serverless collection `VECTORSEARCH` + encryption/network/data access policies.
+- `ecr.tf` : 3 repos (`api`, `web`, `worker`) avec scan-on-push et lifecycle (garde 10 dernières).
+- `ecs.tf` : Cluster Fargate Container-Insights, 3 task definitions (api/web/worker), 3 services, ALB + 2 target groups (`/` → web, `/api/*` `/auth/*` `/admin/*` `/superadmin/*` `/chat/*` `/embed/*` `/source/*` `/managers/*` → api). Worker sans ALB. Autoscaling target tracking sur CPU 60 %.
+- `iam.tf` : `ecs_task_execution_role` (pull ECR + logs + secrets), `task_role_api` (S3 RW knowledge prefix, SQS send, Secrets Manager read scoped, AOSS read/write collection, KMS decrypt), `task_role_worker` (S3 RW, SQS receive/delete, AOSS write, Textract/Transcribe optionnel mais commenté).
+- `cloudfront.tf` : Distribution `web` (origin = ALB pour `apps/web`), distribution `embed` (origin = ALB chemin `/embed/*`), WAF web ACL (AWS Managed Common Rules + rate limit), response headers policy (HSTS, strict CSP, `frame-ancestors` paramétrable). ACM cert conditionnel via `var.web_domain` (skip si vide).
+- `cloudwatch.tf` : dashboard avec widgets (ALB 5xx, ECS CPU/mem, RDS connections, SQS depth, AOSS errors), alarmes SNS topic (`var.alarm_email`).
 
-| Feature front / API                                  | AWS attendu                                          | État Terraform     |
-|------------------------------------------------------|------------------------------------------------------|--------------------|
-| Persistance Prisma (users, conv, messages, audit…)   | RDS PostgreSQL + subnet group + SG                   | Absent             |
-| Run de l'API Fastify + worker ingestion              | ECS Fargate (cluster, services, task defs, ALB)      | Absent             |
-| Réseau privé, accès DB/AOSS sans Internet            | VPC, subnets privés/public, NAT, VPC endpoints       | Absent             |
-| Retrieval hybride / vecteurs                         | OpenSearch Serverless (collection + policies)        | Absent             |
-| KB upload PDF/DOCX/médias                            | S3: lifecycle, encryption, public access block, CORS | Bucket nu, pas de versioning chiffré ni public-access-block ni CORS pour upload présigné |
-| File d'ingestion                                     | SQS + DLQ + alarme age-of-oldest                     | SQS sans DLQ ni alarme |
-| Secrets IA (Mistral, OpenAI, Tavily, SerpAPI)        | Un secret par provider                               | Un seul secret générique |
-| Cognito → rôles app (`CONSULTANT/MANAGER/SUPER_ADMIN/AUDITOR`) | App client, callback URLs, password policy, MFA | Pool + groupes seuls (pas d'app client, pas de MFA, pas de policy) |
-| Embed iframe avec token court                        | CloudFront + WAF + origin allowlist                  | Absent             |
-| Audit / observabilité                                | CloudWatch dashboards + alarms + (optionnel) X-Ray   | Log groups seuls   |
-| Edge front statique                                  | S3 + CloudFront pour `apps/web`                      | Absent             |
-| IAM least-privilege (task roles api/worker)          | Rôles ECS + policies scopées S3/SQS/SM/AOSS/KMS      | Absent             |
-| Rotation des secrets                                 | Secrets Manager rotation lambda                      | Absent             |
+`main.tf` devient juste le bootstrap (provider, KMS, locals) et `outputs.tf` est étendu.
 
-Autres écarts notables côté code :
+### 2. Adaptateurs AWS dans le code (`_backend-reference/`)
 
-- **Persistance** : l'API tourne encore sur un repository in-memory (`apps/api/src/state.ts`) alors que Prisma + RDS sont prévus. Tant que ce n'est pas branché, déployer sur ECS sans RDS donnerait une appli amnésique à chaque redéploiement.
-- **Vector store** : `VectorProvider` est mocké ; aucune intégration OpenSearch n'existe côté code, donc même si on provisionnait AOSS, le worker ne l'utiliserait pas encore.
-- **Extraction lourde** (PDF/DOCX/OCR/transcription) : contrats présents, adapters non implémentés → besoin de Lambda/Textract/Transcribe non listés dans Terraform.
-- **Embed widget** : besoin d'un CloudFront avec header `Content-Security-Policy: frame-ancestors` + origin allowlist, non prévu.
+Chaque adapter respecte le provider boundary existant. Switch via env vars : si présent → adapter AWS, sinon → impl en mémoire.
 
-## Plan d'action proposé
+- `packages/shared/src/providers/` : interfaces `StorageProvider`, `QueueProvider`, `VectorProvider`, `SecretProvider`, `AuthProvider` (si pas déjà extraites — vérification à l'exécution).
+- `apps/api/src/providers/aws/`
+  - `s3-storage.ts` : `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` (presigned PUT/GET).
+  - `sqs-queue.ts` : `@aws-sdk/client-sqs` send.
+  - `secrets-manager.ts` : `@aws-sdk/client-secrets-manager` avec cache 5 min in-memory.
+  - `cognito-auth.ts` : vérif JWT Cognito via JWKS (`jose`), mapping `cognito:groups` → rôles app (`CONSULTANT`/`MANAGER`/`SUPER_ADMIN`/`AUDITOR`).
+  - `opensearch-vector.ts` : `@opensearch-project/opensearch` + `@aws-sdk/credential-provider-node` signer SigV4 pour AOSS.
+- `apps/api/src/repository/` :
+  - `index.ts` : factory qui exporte `inMemoryRepo` si `DATABASE_URL` absent, sinon `prismaRepo`.
+  - `prisma-repo.ts` : implémentation Prisma des méthodes utilisées par les services (users, conversations, messages, responses, feedback, adminComments, documents, chunks, prompts, providerConfigs, auditEvents). Mappage 1-pour-1 avec l'API in-memory existante pour ne pas casser les call sites.
+- `apps/worker/src/providers/aws/` : worker SQS long-poll qui pop les jobs d'ingestion et appelle le pipeline existant ; écrit dans S3 + AOSS.
+- `apps/api/src/bootstrap.ts` : sélection des providers selon env (`NODE_ENV`, `DATABASE_URL`, `AWS_REGION`, `S3_KNOWLEDGE_BUCKET`, `SQS_INGESTION_URL`, `COGNITO_USER_POOL_ID`, `AOSS_ENDPOINT`, `SECRETS_PREFIX`).
 
-### 1. Livrable `BACKEND_AWS_AUDIT.md` (à la racine de `_backend-reference/`)
+Ajout des deps :
+```
+@aws-sdk/client-s3, @aws-sdk/s3-request-presigner,
+@aws-sdk/client-sqs, @aws-sdk/client-secrets-manager,
+@aws-sdk/credential-provider-node, @aws-sdk/signature-v4,
+@opensearch-project/opensearch, jose,
+@prisma/client + prisma (dev)
+```
 
-Document Markdown structuré qui sert de référence partageable :
+### 3. Dockerfiles + image runtime
 
-- Table de correspondance "feature front → endpoint API → ressource AWS → état actuel".
-- Liste des manques classés P0/P1/P2.
-- Recommandations d'architecture cible (schéma ASCII : ALB → ECS api/worker dans VPC privé → RDS + AOSS + S3 + SQS + Secrets Manager + Cognito + CloudFront/WAF pour web et embed).
-- Checklist de mise en production (RLS-equivalent IAM, KMS partout, rotation, alarmes, backups).
+- `apps/api/Dockerfile` : multi-stage Node 22 alpine, build TS, runtime non-root.
+- `apps/worker/Dockerfile` : idem.
+- `apps/web/Dockerfile` : build Vite → nginx alpine servant le bundle statique.
+- `.dockerignore` racine.
 
-### 2. Hardening du squelette Terraform existant
+### 4. Script de déploiement `_backend-reference/scripts/deploy.sh`
 
-Modifications **chirurgicales** dans `_backend-reference/infra/aws/main.tf` (et `variables.tf`/`outputs.tf` au besoin) — pas une refonte complète, juste de quoi rendre le skeleton crédible et combler les manques les plus immédiats sans coûter cher à un environnement non-appliqué :
+Pipeline idempotent :
 
-- `aws_s3_bucket_public_access_block`, `aws_s3_bucket_server_side_encryption_configuration` (KMS) et `aws_s3_bucket_cors_configuration` sur le bucket knowledge.
-- DLQ SQS + `redrive_policy` + `aws_cloudwatch_metric_alarm` `ApproximateAgeOfOldestMessage`.
-- Cognito : `aws_cognito_user_pool_client`, password policy + MFA optionnel sur le pool.
-- Secrets : passer d'un secret unique à `for_each` sur `["mistral", "openai", "tavily", "serpapi"]`.
-- Ajouter les **placeholders nommés mais déclarés** (commentés `// TODO` mais avec la structure correcte) pour : `aws_vpc`, `aws_db_instance` (RDS Postgres), `aws_opensearchserverless_collection`, `aws_ecs_cluster`, `aws_cloudfront_distribution` pour le front + l'embed.
-- `outputs.tf` : exporter les ARN clés (bucket, queue, dlq, user_pool_id, kms_key_arn).
+```
+1. Vérifie aws cli, terraform, docker, jq, AWS_PROFILE et AWS_REGION.
+2. terraform -chdir=infra/aws init && terraform apply -auto-approve
+   pour créer ECR/RDS/etc. (1ère passe sans images = task defs commentées).
+3. Récupère les URLs ECR via terraform output.
+4. docker buildx build --platform linux/amd64 + push api/web/worker.
+5. terraform apply -auto-approve (2e passe avec les images réelles).
+6. Récupère DATABASE_URL depuis Secrets Manager → npx prisma migrate deploy
+   via une task ECS run-task one-shot.
+7. Affiche l'URL ALB / CloudFront et le user_pool_id.
+```
 
-### 3. Pas de changement frontend
+Plus `scripts/destroy.sh` pour teardown propre (skip RDS deletion protection).
 
-Cette demande est une vérification d'alignement backend/infra. Aucune modification de `src/**`. Le mode mocks reste actif par défaut, et basculera sur l'API AWS une fois `VITE_API_URL` configuré.
+### 5. Runbook `_backend-reference/DEPLOYMENT.md`
 
-## Fichiers touchés (en mode build)
+Document opérationnel pas-à-pas :
+- Prérequis (compte AWS, AWS CLI configuré, Docker Desktop, Terraform ≥1.8).
+- Variables à customiser dans `terraform.tfvars.example` (région, CIDR, domaine optionnel, alarm_email).
+- Création d'un premier utilisateur Cognito via AWS CLI (commande prête).
+- Comment basculer le frontend Lovable : `VITE_API_URL=https://<alb-dns>` + `VITE_USE_MOCKS=false`.
+- Procédure de rollback (terraform state + ECR image tags).
+- Surveillance post-deploy (dashboards CloudWatch + alarmes).
 
-- ➕ `_backend-reference/BACKEND_AWS_AUDIT.md` (nouveau)
-- ✏️ `_backend-reference/infra/aws/main.tf` (durcissement S3/SQS/Cognito/Secrets + stubs structurés)
-- ✏️ `_backend-reference/infra/aws/outputs.tf` (nouveaux outputs)
-- ✏️ `_backend-reference/infra/aws/variables.tf` (variables pour DLQ, AOSS, RDS si stubs)
+## Limites assumées
 
-Aucun code applicatif (`apps/api`, `apps/worker`, `src/**`) n'est modifié — l'audit identifie les chantiers code (in-memory → Prisma, OpenSearch adapter, extraction) mais ne les exécute pas ici.
+- Je **ne peux pas exécuter** `terraform apply` ni `docker push` depuis ce sandbox — tu lances `deploy.sh` toi-même avec tes credentials AWS.
+- Je **ne peux pas tester end-to-end** sans environnement AWS réel. Le code compile en local et respecte les contrats existants, mais le premier deploy révélera typiquement 1–3 itérations à faire (security group ports, IAM scoping, AOSS access policies — corrigeables ensuite).
+- **Extraction lourde** (Textract/Transcribe) reste hors scope comme convenu.
+- **CI/CD GitHub Actions** non scaffold (tu as choisi `deploy.sh`).
+- **Domaine custom** : si vide, CloudFront servira sur le hostname `*.cloudfront.net`. Tu pourras ajouter le cert ACM us-east-1 plus tard.
 
-## À confirmer avant build
+## Fichiers touchés
 
-1. Tu veux un **audit-document uniquement** (juste le `.md`), ou **audit + hardening Terraform** comme proposé ci-dessus ?
-2. Tu veux que je liste aussi les chantiers **applicatifs** à faire pour vraiment brancher AWS (Prisma + OpenSearch + extraction) dans le doc, ou seulement l'infra ?
+Nouveaux :
+- `_backend-reference/infra/aws/{network,security,rds,aoss,ecr,ecs,iam,cloudfront,cloudwatch}.tf`
+- `_backend-reference/infra/aws/terraform.tfvars.example`
+- `_backend-reference/apps/{api,worker,web}/Dockerfile`
+- `_backend-reference/.dockerignore`
+- `_backend-reference/apps/api/src/providers/aws/*.ts` (5 adapters)
+- `_backend-reference/apps/api/src/repository/{index,prisma-repo}.ts`
+- `_backend-reference/apps/api/src/bootstrap.ts`
+- `_backend-reference/apps/worker/src/providers/aws/sqs-consumer.ts`
+- `_backend-reference/scripts/{deploy,destroy}.sh`
+- `_backend-reference/DEPLOYMENT.md`
+
+Modifiés :
+- `_backend-reference/infra/aws/main.tf` (allégé, juste bootstrap)
+- `_backend-reference/infra/aws/variables.tf` (+ vars network/RDS/domaine/email)
+- `_backend-reference/infra/aws/outputs.tf` (+ ALB DNS, CloudFront, ECR URLs, RDS endpoint)
+- `_backend-reference/package.json` (+ deps AWS SDK + Prisma) et `apps/api/package.json`, `apps/worker/package.json`
+- `_backend-reference/apps/api/src/state.ts` (factory repo)
+- `_backend-reference/BACKEND_AWS_AUDIT.md` (statut mis à jour : "P0 #2/#3/#4 traités").
+
+Aucune modification du frontend Lovable `src/**`. Le basculement mocks→AWS se fait par 2 env vars sans rebuild de code.
