@@ -132,13 +132,74 @@
   --sidebar-ring: oklch(0.551 0.027 264.364);
 }
 
+/* ============================================================
+ * MIGSO-PCUBED design tokens (portés depuis apps/web/tailwind.config.ts)
+ * ============================================================ */
+@theme {
+  --color-mp-navy: #061d3a;
+  --color-mp-navy2: #0b2f5b;
+  --color-mp-cyan: #1db7e8;
+  --color-mp-blue: #2563eb;
+  --color-mp-soft: #eef6fb;
+  --radius-mp: 8px;
+  --shadow-panel: 0 12px 36px rgba(6, 29, 58, 0.08);
+  --font-sans: Inter, ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif;
+}
+
 @layer base {
   * {
     border-color: var(--color-border);
+    box-sizing: border-box;
   }
 
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    font-family: var(--font-sans);
+    background:
+      linear-gradient(180deg, rgba(226, 240, 249, 0.74), rgba(248, 250, 252, 0.94) 280px),
+      #f8fafc;
+  }
+
+  button:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  a:focus-visible {
+    outline: 2px solid #1db7e8;
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  .mp-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #a7bfd2 transparent;
+  }
+  .mp-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .mp-scrollbar::-webkit-scrollbar-thumb {
+    background: #a7bfd2;
+    border-radius: 8px;
+  }
+  .mp-text-wrap {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .mp-card {
+    background: #fff;
+    border: 1px solid rgba(148, 163, 184, 0.32);
+    border-radius: 8px;
+    box-shadow: 0 12px 36px rgba(6, 29, 58, 0.06);
+  }
+  .mp-surface {
+    background: #fff;
+    border: 1px solid rgba(148, 163, 184, 0.32);
+    border-radius: 8px;
+  }
+  .mp-muted {
+    color: #64748b;
   }
 }
