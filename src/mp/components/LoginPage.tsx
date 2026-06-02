@@ -1,6 +1,6 @@
-import { ArrowRight, LockKeyhole, Mail, Shield, Sparkles, Zap } from "lucide-react";
-import { useState, type FormEvent } from "react";
-import { motion } from "framer-motion";
+import { ArrowRight, Building2, LockKeyhole, Mail, Shield, Sparkles, User as UserIcon, UserCheck, Zap } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { ApiClient } from "../api";
 import { useAuth } from "../auth";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import type { User } from "../shared";
+import type { Session } from "../types";
 
 const demoAccounts = [
   { email: "superadmin@migso-pcubed.local", role: "Super Admin", color: "from-violet-500 to-fuchsia-500" },
@@ -16,18 +18,38 @@ const demoAccounts = [
   { email: "auditor@migso-pcubed.local", role: "Auditeur", color: "from-amber-500 to-orange-500" },
 ];
 
+type Mode = "signin" | "signup";
+
 export function LoginPage() {
   const { setSession } = useAuth();
+  const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("consultant1@migso-pcubed.local");
   const [password, setPassword] = useState("password123");
   const [loading, setLoading] = useState(false);
+
+  // Sign-up state
+  const [name, setName] = useState("");
+  const [signupEmail, setSignupEmail] = useState("");
+  const [signupPassword, setSignupPassword] = useState("");
+  const [department, setDepartment] = useState("");
+  const [managers, setManagers] = useState<User[]>([]);
+  const [managerId, setManagerId] = useState<string>("");
+
+  useEffect(() => {
+    if (mode !== "signup") return;
+    const api = new ApiClient(() => null);
+    api
+      .get<{ managers?: User[] }>("/managers/active")
+      .then((p) => setManagers(p?.managers ?? []))
+      .catch(() => setManagers([]));
+  }, [mode]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setLoading(true);
     try {
       const api = new ApiClient(() => null);
-      const session = await api.post<import("../types").Session>("/auth/login", { email, password });
+      const session = await api.post<Session>("/auth/login", { email, password });
       setSession(session);
       toast.success("Connexion réussie", { description: `Bienvenue ${session.user.name}` });
     } catch (err) {
@@ -38,6 +60,36 @@ export function LoginPage() {
       setLoading(false);
     }
   }
+
+  async function submitSignup(event: FormEvent) {
+    event.preventDefault();
+    if (!managerId) {
+      toast.error("Choisissez votre manager dans la liste");
+      return;
+    }
+    setLoading(true);
+    try {
+      const api = new ApiClient(() => null);
+      const session = await api.post<Session>("/auth/register", {
+        name,
+        email: signupEmail,
+        password: signupPassword,
+        managerId,
+        department: department || undefined,
+      });
+      setSession(session);
+      toast.success("Compte créé", {
+        description: `Bienvenue ${session.user.name}, votre manager est rattaché.`,
+      });
+    } catch (err) {
+      toast.error("Création de compte impossible", {
+        description: err instanceof Error ? err.message : "Une erreur est survenue",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
 
   return (
     <main className="grid min-h-screen lg:grid-cols-2">
