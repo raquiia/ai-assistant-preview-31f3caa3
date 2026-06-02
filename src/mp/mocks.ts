@@ -744,6 +744,7 @@ export function handleMock<T>(
     return payload as T;
   }
   if (method === "POST" && path === "/kb/documents") {
+    if (session?.user.role !== "SUPER_ADMIN") throw new Error("403 — Seul le Super Admin peut alimenter la base de connaissance");
     const title = body instanceof FormData ? String(body.get("title") ?? "Document") : "Document";
     const doc: DocumentRecord = {
       id: id("d"),
@@ -762,6 +763,7 @@ export function handleMock<T>(
   }
   m = match(path, "/kb/documents/:id");
   if (method === "PATCH" && m) {
+    if (session?.user.role !== "SUPER_ADMIN") throw new Error("403 — Réservé au Super Admin");
     const doc = documents.find((d) => d.id === m!.id);
     if (doc) Object.assign(doc, body ?? {});
     return { document: doc } as T;
