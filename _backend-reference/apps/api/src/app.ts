@@ -176,7 +176,7 @@ export async function buildApp() {
     }
   });
 
-  app.post("/auth/logout", { preHandler: auth(repo) }, async (request) => {
+  app.post("/auth/logout", { preHandler: authPre }, async (request) => {
     repo.audit({
       actorId: request.actor!.id,
       action: "LOGOUT",
@@ -189,7 +189,7 @@ export async function buildApp() {
     return { ok: true };
   });
 
-  app.get("/auth/me", { preHandler: auth(repo) }, async (request) => ({ user: request.actor }));
+  app.get("/auth/me", { preHandler: authPre }, async (request) => ({ user: request.actor }));
 
   /**
    * Cognito-backed bootstrap endpoint.
@@ -229,7 +229,7 @@ export async function buildApp() {
 
 
 
-  app.post("/auth/first-visit/manager", { preHandler: auth(repo) }, async (request, reply) => {
+  app.post("/auth/first-visit/manager", { preHandler: authPre }, async (request, reply) => {
     const actor = request.actor!;
     const body = request.body as { managerId?: string };
     if (actor.role !== "CONSULTANT") return reply.code(400).send({ error: "Only consultants select a manager" });
@@ -250,7 +250,7 @@ export async function buildApp() {
     return { user: actor };
   });
 
-  app.get("/managers/active", { preHandler: auth(repo) }, async () => ({
+  app.get("/managers/active", { preHandler: authPre }, async () => ({
     managers: repo.state.users.filter((user) => user.role === "MANAGER" && user.status === "ACTIVE")
   }));
 
@@ -311,7 +311,7 @@ export async function buildApp() {
   });
 
   // Manager approval workflow
-  app.get("/managers/me/pending-consultants", { preHandler: auth(repo) }, async (request, reply) => {
+  app.get("/managers/me/pending-consultants", { preHandler: authPre }, async (request, reply) => {
     const actor = request.actor!;
     if (actor.role !== "MANAGER" && actor.role !== "SUPER_ADMIN") {
       return reply.code(403).send({ error: "Access denied" });
@@ -325,7 +325,7 @@ export async function buildApp() {
     return { consultants: pending };
   });
 
-  app.post("/managers/consultants/:id/approve", { preHandler: auth(repo) }, async (request, reply) => {
+  app.post("/managers/consultants/:id/approve", { preHandler: authPre }, async (request, reply) => {
     const actor = request.actor!;
     if (actor.role !== "MANAGER" && actor.role !== "SUPER_ADMIN") {
       return reply.code(403).send({ error: "Access denied" });
@@ -359,7 +359,7 @@ export async function buildApp() {
     return { user: target };
   });
 
-  app.post("/managers/consultants/:id/reject", { preHandler: auth(repo) }, async (request, reply) => {
+  app.post("/managers/consultants/:id/reject", { preHandler: authPre }, async (request, reply) => {
     const actor = request.actor!;
     if (actor.role !== "MANAGER" && actor.role !== "SUPER_ADMIN") {
       return reply.code(403).send({ error: "Access denied" });
@@ -387,7 +387,7 @@ export async function buildApp() {
     return { user: target };
   });
 
-  app.get("/notifications/pending-count", { preHandler: auth(repo) }, async (request) => {
+  app.get("/notifications/pending-count", { preHandler: authPre }, async (request) => {
     const actor = request.actor!;
     if (actor.role === "MANAGER") {
       const count = repo.state.users.filter(
@@ -409,16 +409,16 @@ export async function buildApp() {
 
 
 
-  app.post("/chat/conversations", { preHandler: auth(repo) }, async (request) => {
+  app.post("/chat/conversations", { preHandler: authPre }, async (request) => {
     const body = request.body as { title?: string; language?: string; channel?: "WEB" | "EMBED" | "API" };
     return { conversation: chat.createConversation(request.actor!, body.title, body.language, body.channel ?? "WEB") };
   });
 
-  app.get("/chat/conversations", { preHandler: auth(repo) }, async (request) => ({
+  app.get("/chat/conversations", { preHandler: authPre }, async (request) => ({
     conversations: repo.state.conversations.filter((conversation) => canViewConversation(request.actor!, conversation))
   }));
 
-  app.get("/chat/conversations/:id", { preHandler: auth(repo) }, async (request, reply) => {
+  app.get("/chat/conversations/:id", { preHandler: authPre }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const conversation = repo.state.conversations.find((item) => item.id === id);
     if (!conversation) return reply.code(404).send({ error: "Conversation not found" });
@@ -430,13 +430,13 @@ export async function buildApp() {
     };
   });
 
-  app.post("/chat/conversations/:id/messages", { preHandler: auth(repo) }, async (request) => {
+  app.post("/chat/conversations/:id/messages", { preHandler: authPre }, async (request) => {
     const { id } = request.params as { id: string };
     const body = request.body as { content: string };
     return chat.answer(request.actor!, id, body.content);
   });
 
-  app.post("/chat/messages/:id/attachments", { preHandler: auth(repo) }, async (request, reply) => {
+  app.post("/chat/messages/:id/attachments", { preHandler: authPre }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const message = repo.state.messages.find((item) => item.id === id);
     if (!message) return reply.code(404).send({ error: "Message not found" });
@@ -465,18 +465,18 @@ export async function buildApp() {
     return { attachment };
   });
 
-  app.post("/chat/responses/:id/feedback", { preHandler: auth(repo) }, async (request) => {
+  app.post("/chat/responses/:id/feedback", { preHandler: authPre }, async (request) => {
     const { id } = request.params as { id: string };
     const body = request.body as { rating: FeedbackRating; comment?: string };
     return chat.addFeedback(request.actor!, id, body.rating, body.comment);
   });
 
-  app.post("/chat/responses/:id/retry-fallback", { preHandler: auth(repo) }, async (request) => {
+  app.post("/chat/responses/:id/retry-fallback", { preHandler: authPre }, async (request) => {
     const { id } = request.params as { id: string };
     return chat.retryFallback(request.actor!, id);
   });
 
-  app.post("/admin/kb/upload", { preHandler: auth(repo) }, async (request, reply) => {
+  app.post("/admin/kb/upload", { preHandler: authPre }, async (request, reply) => {
     if (!canUploadKnowledge(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     if (request.isMultipart()) {
       const file = await request.file();
@@ -495,25 +495,25 @@ export async function buildApp() {
     return chat.ingestKnowledge(request.actor!, { title: body.title, text: body.text ?? "", mimeType: body.mimeType });
   });
 
-  app.get("/admin/kb/documents", { preHandler: auth(repo) }, async (request, reply) => {
+  app.get("/admin/kb/documents", { preHandler: authPre }, async (request, reply) => {
     if (!canUploadKnowledge(request.actor!) && !canViewAudit(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     return { documents: repo.state.documents };
   });
 
-  app.get("/admin/kb/documents/:id", { preHandler: auth(repo) }, async (request, reply) => {
+  app.get("/admin/kb/documents/:id", { preHandler: authPre }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const document = repo.state.documents.find((item) => item.id === id);
     if (!document) return reply.code(404).send({ error: "Document not found" });
     return { document, chunks: repo.state.chunks.filter((chunk) => chunk.documentId === id) };
   });
 
-  app.post("/admin/kb/documents/:id/reindex", { preHandler: auth(repo) }, async (request, reply) => {
+  app.post("/admin/kb/documents/:id/reindex", { preHandler: authPre }, async (request, reply) => {
     if (request.actor!.role !== "SUPER_ADMIN") return reply.code(403).send({ error: "Access denied" });
     await repo.retriever.indexAll();
     return { ok: true };
   });
 
-  app.post("/admin/kb/documents/:id/publish", { preHandler: auth(repo) }, async (request, reply) => {
+  app.post("/admin/kb/documents/:id/publish", { preHandler: authPre }, async (request, reply) => {
     if (request.actor!.role !== "SUPER_ADMIN") return reply.code(403).send({ error: "Access denied" });
     const { id } = request.params as { id: string };
     const document = repo.state.documents.find((item) => item.id === id);
@@ -532,7 +532,7 @@ export async function buildApp() {
     return { document };
   });
 
-  app.get("/source/:chunkId", { preHandler: optionalAuth(repo) }, async (request, reply) => {
+  app.get("/source/:chunkId", { preHandler: optionalAuthPre }, async (request, reply) => {
     const { chunkId } = request.params as { chunkId: string };
     const chunk = repo.state.chunks.find((item) => item.id === chunkId);
     if (!chunk) return reply.code(404).send({ error: "Source not found" });
@@ -552,7 +552,7 @@ export async function buildApp() {
     };
   });
 
-  app.get("/admin/history", { preHandler: auth(repo) }, async (request, reply) => {
+  app.get("/admin/history", { preHandler: authPre }, async (request, reply) => {
     if (request.actor!.role === "CONSULTANT") return reply.code(403).send({ error: "Access denied" });
     const rows = repo.state.responses
       .map((response) => toHistoryRow(repo, response.id))
@@ -560,7 +560,7 @@ export async function buildApp() {
     return { rows };
   });
 
-  app.get("/admin/history/:responseId", { preHandler: auth(repo) }, async (request, reply) => {
+  app.get("/admin/history/:responseId", { preHandler: authPre }, async (request, reply) => {
     const { responseId } = request.params as { responseId: string };
     const row = toHistoryRow(repo, responseId);
     if (!row) return reply.code(404).send({ error: "Response not found" });
@@ -570,7 +570,7 @@ export async function buildApp() {
     return row;
   });
 
-  app.post("/admin/history/:responseId/comment", { preHandler: auth(repo) }, async (request, reply) => {
+  app.post("/admin/history/:responseId/comment", { preHandler: authPre }, async (request, reply) => {
     assertRole(request.actor!, ["MANAGER", "SUPER_ADMIN"]);
     const { responseId } = request.params as { responseId: string };
     const body = request.body as { comment?: string; status?: "DRAFT" | "APPROVED" };
@@ -619,7 +619,7 @@ export async function buildApp() {
     return { adminComment, corrections: repo.state.corrections.filter((correction) => correction.adminCommentId === adminComment.id) };
   });
 
-  app.get("/superadmin/corrections", { preHandler: auth(repo) }, async (request, reply) => {
+  app.get("/superadmin/corrections", { preHandler: authPre }, async (request, reply) => {
     if (request.actor!.role !== "SUPER_ADMIN") return reply.code(403).send({ error: "Access denied" });
     return {
       corrections: repo.state.corrections
@@ -632,7 +632,7 @@ export async function buildApp() {
     };
   });
 
-  app.post("/admin/history/:responseId/translate", { preHandler: auth(repo) }, async (request) => {
+  app.post("/admin/history/:responseId/translate", { preHandler: authPre }, async (request) => {
     const { responseId } = request.params as { responseId: string };
     const body = request.body as { language?: string };
     const row = toHistoryRow(repo, responseId);
@@ -644,7 +644,7 @@ export async function buildApp() {
     };
   });
 
-  app.get("/admin/dashboard", { preHandler: auth(repo) }, async (request, reply) => {
+  app.get("/admin/dashboard", { preHandler: authPre }, async (request, reply) => {
     if (request.actor!.role === "CONSULTANT") return reply.code(403).send({ error: "Access denied" });
     const responses = repo.state.responses;
     const latencies = responses.map((response) => response.latencyMs).sort((a, b) => a - b);
@@ -662,12 +662,12 @@ export async function buildApp() {
     };
   });
 
-  app.get("/superadmin/users", { preHandler: auth(repo) }, async (request, reply) => {
+  app.get("/superadmin/users", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     return { users: repo.state.users };
   });
 
-  app.post("/superadmin/users", { preHandler: auth(repo) }, async (request, reply) => {
+  app.post("/superadmin/users", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     const body = request.body as Partial<User> & { role?: Role; temporaryPassword?: string };
     if (!body.email || !body.name || !body.role) return reply.code(400).send({ error: "Missing email, name or role" });
@@ -723,7 +723,7 @@ export async function buildApp() {
   });
 
 
-  app.patch("/superadmin/users/:id", { preHandler: auth(repo) }, async (request, reply) => {
+  app.patch("/superadmin/users/:id", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     const { id } = request.params as { id: string };
     const user = repo.findUserById(id);
@@ -732,7 +732,7 @@ export async function buildApp() {
     return { user };
   });
 
-  app.delete("/superadmin/users/:id", { preHandler: auth(repo) }, async (request, reply) => {
+  app.delete("/superadmin/users/:id", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     const { id } = request.params as { id: string };
     const user = repo.findUserById(id);
@@ -751,12 +751,12 @@ export async function buildApp() {
     return { user };
   });
 
-  app.get("/superadmin/managers", { preHandler: auth(repo) }, async (request, reply) => {
+  app.get("/superadmin/managers", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     return { managers: repo.state.managerProfiles.map((profile) => ({ ...profile, user: repo.findUserById(profile.userId) })) };
   });
 
-  app.post("/superadmin/managers", { preHandler: auth(repo) }, async (request, reply) => {
+  app.post("/superadmin/managers", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     const body = request.body as { userId?: string; department?: string };
     const user = body.userId ? repo.findUserById(body.userId) : undefined;
@@ -771,7 +771,7 @@ export async function buildApp() {
     return { manager: profile };
   });
 
-  app.patch("/superadmin/managers/:id", { preHandler: auth(repo) }, async (request, reply) => {
+  app.patch("/superadmin/managers/:id", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     const { id } = request.params as { id: string };
     const profile = repo.state.managerProfiles.find((item) => item.id === id);
@@ -780,7 +780,7 @@ export async function buildApp() {
     return { manager: profile };
   });
 
-  app.delete("/superadmin/managers/:id", { preHandler: auth(repo) }, async (request, reply) => {
+  app.delete("/superadmin/managers/:id", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     const { id } = request.params as { id: string };
     const profile = repo.state.managerProfiles.find((item) => item.id === id);
@@ -789,12 +789,12 @@ export async function buildApp() {
     return { manager: profile };
   });
 
-  app.get("/superadmin/prompts", { preHandler: auth(repo) }, async (request, reply) => {
+  app.get("/superadmin/prompts", { preHandler: authPre }, async (request, reply) => {
     if (!canEditPrompts(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     return { prompts: repo.state.prompts };
   });
 
-  app.post("/superadmin/prompts", { preHandler: auth(repo) }, async (request, reply) => {
+  app.post("/superadmin/prompts", { preHandler: authPre }, async (request, reply) => {
     if (!canEditPrompts(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     const body = request.body as { name?: string; content?: string; configJson?: Record<string, unknown>; active?: boolean };
     if (!body.name || !body.content) return reply.code(400).send({ error: "Missing prompt fields" });
@@ -821,7 +821,7 @@ export async function buildApp() {
     return { prompt };
   });
 
-  app.post("/superadmin/prompts/:id/rollback", { preHandler: auth(repo) }, async (request, reply) => {
+  app.post("/superadmin/prompts/:id/rollback", { preHandler: authPre }, async (request, reply) => {
     if (!canEditPrompts(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     const { id } = request.params as { id: string };
     const prompt = repo.state.prompts.find((item) => item.id === id);
@@ -840,7 +840,7 @@ export async function buildApp() {
     return { prompt };
   });
 
-  app.delete("/superadmin/prompts/:id", { preHandler: auth(repo) }, async (request, reply) => {
+  app.delete("/superadmin/prompts/:id", { preHandler: authPre }, async (request, reply) => {
     if (!canEditPrompts(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     const { id } = request.params as { id: string };
     const prompt = repo.state.prompts.find((item) => item.id === id);
@@ -849,12 +849,12 @@ export async function buildApp() {
     return { prompt };
   });
 
-  app.get("/superadmin/ai-providers", { preHandler: auth(repo) }, async (request, reply) => {
+  app.get("/superadmin/ai-providers", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     return { providers: repo.maskedProviderConfigs() };
   });
 
-  app.post("/superadmin/ai-providers", { preHandler: auth(repo) }, async (request, reply) => {
+  app.post("/superadmin/ai-providers", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     const body = request.body as { provider?: "mistral" | "openai" | "search"; apiKey?: string; model?: string; active?: boolean; configJson?: Record<string, unknown> };
     if (!body.provider || !body.model) return reply.code(400).send({ error: "Missing provider or model" });
@@ -883,7 +883,7 @@ export async function buildApp() {
     return { provider: { ...config, encryptedApiKeyRef: config.encryptedApiKeyRef ? "stored" : null } };
   });
 
-  app.patch("/superadmin/ai-providers/:id", { preHandler: auth(repo) }, async (request, reply) => {
+  app.patch("/superadmin/ai-providers/:id", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     const { id } = request.params as { id: string };
     const config = repo.state.providerConfigs.find((item) => item.id === id);
@@ -901,7 +901,7 @@ export async function buildApp() {
     return { provider: { ...config, encryptedApiKeyRef: config.encryptedApiKeyRef ? "stored" : null } };
   });
 
-  app.delete("/superadmin/ai-providers/:id", { preHandler: auth(repo) }, async (request, reply) => {
+  app.delete("/superadmin/ai-providers/:id", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     const { id } = request.params as { id: string };
     const config = repo.state.providerConfigs.find((item) => item.id === id);
@@ -913,7 +913,7 @@ export async function buildApp() {
 
   // Test connectivity / validity of a stored provider API key.
   // Returns latency, currently reachable status, and a timestamp.
-  app.post("/superadmin/ai-providers/:id/test", { preHandler: auth(repo) }, async (request, reply) => {
+  app.post("/superadmin/ai-providers/:id/test", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     const { id } = request.params as { id: string };
     const config = repo.state.providerConfigs.find((item) => item.id === id);
@@ -966,12 +966,12 @@ export async function buildApp() {
   /* path used when SECRETS_PREFIX is configured.                       */
   /* ------------------------------------------------------------------ */
 
-  app.get("/superadmin/ai-providers/aws", { preHandler: auth(repo) }, async (request, reply) => {
+  app.get("/superadmin/ai-providers/aws", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     return { providers: await aiProviderSvc.list() };
   });
 
-  app.post("/superadmin/ai-providers/aws", { preHandler: auth(repo) }, async (request, reply) => {
+  app.post("/superadmin/ai-providers/aws", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     const body = request.body as { provider?: AiProviderName; apiKey?: string; model?: string; configJson?: Record<string, unknown> };
     if (!body.provider || !body.apiKey) return reply.code(400).send({ error: "provider and apiKey required" });
@@ -988,7 +988,7 @@ export async function buildApp() {
     }
   });
 
-  app.patch("/superadmin/ai-providers/aws/:provider/rotate", { preHandler: auth(repo) }, async (request, reply) => {
+  app.patch("/superadmin/ai-providers/aws/:provider/rotate", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     const { provider } = request.params as { provider: AiProviderName };
     const body = request.body as { apiKey?: string };
@@ -1001,7 +1001,7 @@ export async function buildApp() {
     }
   });
 
-  app.delete("/superadmin/ai-providers/aws/:provider", { preHandler: auth(repo) }, async (request, reply) => {
+  app.delete("/superadmin/ai-providers/aws/:provider", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     const { provider } = request.params as { provider: AiProviderName };
     try {
@@ -1012,13 +1012,13 @@ export async function buildApp() {
     }
   });
 
-  app.get("/superadmin/audit/events", { preHandler: auth(repo) }, async (request, reply) => {
+  app.get("/superadmin/audit/events", { preHandler: authPre }, async (request, reply) => {
     if (!canViewAudit(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     return { events: repo.state.auditEvents };
   });
 
 
-  app.get("/superadmin/compliance/system-card", { preHandler: auth(repo) }, async (request, reply) => {
+  app.get("/superadmin/compliance/system-card", { preHandler: authPre }, async (request, reply) => {
     if (!canViewAudit(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     return {
       systemCard: {
@@ -1033,17 +1033,17 @@ export async function buildApp() {
     };
   });
 
-  app.post("/superadmin/compliance/export", { preHandler: auth(repo) }, async (request, reply) => {
+  app.post("/superadmin/compliance/export", { preHandler: authPre }, async (request, reply) => {
     if (!canViewAudit(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     return { exportedAt: new Date().toISOString(), format: "json", data: repo.state };
   });
 
-  app.get("/superadmin/settings", { preHandler: auth(repo) }, async (request, reply) => {
+  app.get("/superadmin/settings", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     return { settings: repo.state.settings };
   });
 
-  app.patch("/superadmin/settings", { preHandler: auth(repo) }, async (request, reply) => {
+  app.patch("/superadmin/settings", { preHandler: authPre }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     Object.assign(repo.state.settings, request.body as Record<string, unknown>);
     repo.audit({
