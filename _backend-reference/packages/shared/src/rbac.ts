@@ -20,7 +20,9 @@ export function canEditPrompts(actor: User): boolean {
 }
 
 export function canUploadKnowledge(actor: User): boolean {
-  return actor.role === "SUPER_ADMIN" || actor.role === "MANAGER";
+  // Verrou volontaire : seul le Super Admin alimente la base vectorielle.
+  // Les MANAGER conservent un accès lecture seule via canReadKnowledge.
+  return actor.role === "SUPER_ADMIN";
 }
 
 export function canViewConversation(actor: User, conversation: Conversation): boolean {
