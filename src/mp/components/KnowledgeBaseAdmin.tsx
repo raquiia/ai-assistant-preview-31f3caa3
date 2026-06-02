@@ -236,6 +236,25 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
               </div>
 
               <div className="rounded-xl border border-border/50 bg-muted/40 p-4 text-sm text-foreground/80">
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Tags
+                  </p>
+                  {session.user.role === "SUPER_ADMIN" && (
+                    <TagEditor
+                      industryTags={selected.document.industryTags ?? []}
+                      pmDomainTags={selected.document.pmDomainTags ?? []}
+                      onSave={(ind, dom) => updateTags(selected.document.id, ind, dom)}
+                    />
+                  )}
+                </div>
+                <TagList
+                  industryTags={selected.document.industryTags ?? []}
+                  pmDomainTags={selected.document.pmDomainTags ?? []}
+                />
+              </div>
+
+              <div className="rounded-xl border border-border/50 bg-muted/40 p-4 text-sm text-foreground/80">
                 <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                   Statut de revue
                 </p>
