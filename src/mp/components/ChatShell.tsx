@@ -138,7 +138,11 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
       };
       setMessages((prev) => [...prev, optimistic]);
 
-      const answer = await api.post<ChatAnswerPayload>(`/chat/conversations/${conversationId}/messages`, { content: trimmed });
+      const answer = await api.post<ChatAnswerPayload>(`/chat/conversations/${conversationId}/messages`, {
+        content: trimmed,
+        industryTags: filters.industryTags,
+        pmDomainTags: filters.pmDomainTags,
+      });
       await loadConversation(conversationId);
       setLastAnswer(answer);
       await refreshConversations();
