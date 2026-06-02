@@ -7,6 +7,10 @@ import { AdminLayout } from "./AdminLayout";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
 import { UploadPanel } from "./UploadPanel";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import { toast } from "sonner";
 
 interface DocumentDetail {
   document: DocumentRecord;
@@ -20,11 +24,18 @@ interface DocumentDetail {
   }>;
 }
 
+function statusVariant(status: string): "default" | "secondary" | "outline" {
+  if (status === "PUBLISHED") return "default";
+  if (status === "NEEDS_REVIEW") return "secondary";
+  return "outline";
+}
+
 export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: Session }) {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
-  const [sampleText, setSampleText] = useState("Le controle des couts doit relier budget, forecast, reste a faire, risques et actions de mitigation.");
+  const [sampleText, setSampleText] = useState(
+    "Le contrôle des coûts doit relier budget, forecast, reste à faire, risques et actions de mitigation.",
+  );
   const [selected, setSelected] = useState<DocumentDetail | null>(null);
-  const [status, setStatus] = useState<string>("");
 
   async function refresh() {
     const payload = await api.get<{ documents: DocumentRecord[] }>("/admin/kb/documents");
@@ -40,15 +51,16 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
 
   useEffect(() => {
     refresh().catch(() => setDocuments([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function ingestText() {
     await api.post("/admin/kb/upload", {
       title: "Note PMO locale.md",
       mimeType: "text/markdown",
-      text: sampleText
+      text: sampleText,
     });
-    setStatus("Document envoye pour revue.");
+    toast.success("Document envoyé pour revue");
     await refresh();
   }
 
@@ -60,65 +72,92 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
   async function publishSelected() {
     if (!selected || session.user.role !== "SUPER_ADMIN") return;
     await api.post(`/admin/kb/documents/${selected.document.id}/publish`, {});
-    setStatus("Document publie et vectorisation relancee.");
+    toast.success("Document publié et vectorisation relancée");
     await refresh();
   }
 
   async function reindexSelected() {
     if (!selected || session.user.role !== "SUPER_ADMIN") return;
     await api.post(`/admin/kb/documents/${selected.document.id}/reindex`, {});
-    setStatus("Reindexation lancee.");
+    toast.success("Réindexation lancée");
   }
 
   return (
     <AdminLayout
       title="Knowledge Base"
+      description="Gérez la base documentaire, contrôlez les revues et la vectorisation des sources."
       actions={
         <div className="flex flex-wrap gap-2">
           <UploadPanel api={api} onUploaded={() => void refresh()} />
-          <button className="flex h-10 items-center gap-2 rounded-mp border border-slate-200 bg-white px-3 text-sm hover:bg-slate-50" onClick={() => void refresh()}>
-            <RefreshCcw size={16} />
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => void refresh()}>
+            <RefreshCcw size={15} />
             Recharger
-          </button>
+          </Button>
         </div>
       }
     >
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <section className="min-w-0 space-y-4">
-          {status && <p className="rounded-mp border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm text-slate-700">{status}</p>}
-          <div className="rounded-mp border border-slate-200 bg-white p-4 shadow-sm">
-            <p className="mb-2 text-sm font-semibold text-slate-950">Upload texte rapide</p>
-            <textarea
-              className="min-h-28 w-full rounded-mp border border-slate-200 p-3 text-sm outline-none focus:border-mp-cyan"
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_440px]">
+        <section className="min-w-0 space-y-5">
+          <div className="rounded-2xl border border-border/70 bg-card p-5 shadow-sm">
+            <div className="mb-3 flex items-center gap-2">
+              <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary">
+                <UploadCloud size={15} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">Upload texte rapide</p>
+                <p className="text-xs text-muted-foreground">Idéal pour un essai ou une note interne.</p>
+              </div>
+            </div>
+            <Textarea
+              className="min-h-28 resize-none"
               value={sampleText}
               onChange={(event) => setSampleText(event.target.value)}
             />
-            <button className="mt-3 flex h-10 items-center gap-2 rounded-mp bg-mp-blue px-3 text-sm font-semibold text-white shadow-sm" onClick={() => void ingestText()}>
-              <UploadCloud size={16} />
+            <Button size="sm" className="mt-3 gap-2" onClick={() => void ingestText()}>
+              <UploadCloud size={15} />
               Envoyer en revue
-            </button>
+            </Button>
           </div>
 
           {documents.length ? (
             <DataTable
               rows={documents}
               getKey={(row) => row.id}
+              onRowClick={(row) => void inspect(row.id)}
               columns={[
                 {
                   key: "title",
                   header: "Document",
                   render: (row) => (
-                    <button className="flex max-w-full items-center gap-2 text-left font-medium text-mp-blue hover:underline" onClick={() => void inspect(row.id)}>
-                      <FileText size={15} className="shrink-0" />
+                    <div className="flex items-center gap-2 font-medium text-foreground">
+                      <FileText size={15} className="shrink-0 text-primary" />
                       <span className="truncate">{row.title}</span>
-                    </button>
-                  )
+                    </div>
+                  ),
                 },
-                { key: "mimeType", header: "Type" },
-                { key: "status", header: "Statut" },
+                { key: "mimeType", header: "Type", render: (row) => (
+                  <span className="font-mono text-xs text-muted-foreground">{row.mimeType}</span>
+                ) },
+                {
+                  key: "status",
+                  header: "Statut",
+                  render: (row) => (
+                    <Badge variant={statusVariant(row.status)} className="rounded-full">
+                      {row.status}
+                    </Badge>
+                  ),
+                },
                 { key: "version", header: "Version" },
                 { key: "language", header: "Langue" },
-                { key: "createdAt", header: "Date", render: (row) => new Date(row.createdAt).toLocaleString() }
+                {
+                  key: "createdAt",
+                  header: "Date",
+                  render: (row) => (
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(row.createdAt).toLocaleString()}
+                    </span>
+                  ),
+                },
               ]}
             />
           ) : (
@@ -130,54 +169,80 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
           )}
         </section>
 
-        <aside className="rounded-mp border border-slate-200 bg-white p-4 shadow-sm">
+        <aside className="rounded-2xl border border-border/70 bg-card p-5 shadow-sm">
           {selected ? (
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div>
-                <p className="text-sm font-semibold text-slate-950">{selected.document.title}</p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {selected.document.status} · {selected.chunks.length} chunk(s)
+                <p className="font-display text-base font-semibold text-foreground">
+                  {selected.document.title}
                 </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Badge variant={statusVariant(selected.document.status)} className="rounded-full">
+                    {selected.document.status}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {selected.chunks.length} chunk(s)
+                  </span>
+                </div>
               </div>
 
-              <div className="rounded-mp border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Statut de revue</p>
-                <p>
+              <div className="rounded-xl border border-border/50 bg-muted/40 p-4 text-sm text-foreground/80">
+                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Statut de revue
+                </p>
+                <p className="leading-relaxed">
                   {selected.document.status === "NEEDS_REVIEW"
                     ? "Document en attente de revue superadmin avant publication et vectorisation."
                     : "Document publié et disponible pour le retrieval."}
                 </p>
               </div>
 
-              {session.user.role === "SUPER_ADMIN" && selected.document.status === "NEEDS_REVIEW" && (
-                <div className="flex flex-wrap gap-2">
-                  <button className="flex h-10 items-center gap-2 rounded-mp bg-mp-blue px-3 text-sm font-semibold text-white" onClick={() => void publishSelected()}>
-                    <ShieldCheck size={15} />
-                    Publier
-                  </button>
-                  <button className="flex h-10 items-center gap-2 rounded-mp border border-slate-200 px-3 text-sm hover:bg-slate-50" onClick={() => void reindexSelected()}>
-                    <RefreshCcw size={15} />
-                    Relancer la vectorisation
-                  </button>
-                </div>
-              )}
+              {session.user.role === "SUPER_ADMIN" &&
+                selected.document.status === "NEEDS_REVIEW" && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" className="gap-2" onClick={() => void publishSelected()}>
+                      <ShieldCheck size={15} />
+                      Publier
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-2"
+                      onClick={() => void reindexSelected()}
+                    >
+                      <RefreshCcw size={15} />
+                      Relancer la vectorisation
+                    </Button>
+                  </div>
+                )}
 
               <div className="space-y-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Passages extraits</p>
-                {selected.chunks.map((chunk) => (
-                  <div key={chunk.id} className="rounded-mp border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-sm font-medium text-slate-950">{chunk.title}</p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {chunk.section ?? "Section interne"}{chunk.page ? ` · Page ${chunk.page}` : ""}{chunk.paragraph ? ` · Paragraphe ${chunk.paragraph}` : ""}
-                    </p>
-                    <p className="mt-2 mp-text-wrap text-sm leading-6 text-slate-700">{chunk.text}</p>
-                  </div>
-                ))}
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Passages extraits
+                </p>
+                <div className="space-y-2.5">
+                  {selected.chunks.map((chunk) => (
+                    <div
+                      key={chunk.id}
+                      className="rounded-xl border border-border/50 bg-muted/30 p-3.5 transition-colors hover:bg-muted/50"
+                    >
+                      <p className="text-sm font-medium text-foreground">{chunk.title}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                        {chunk.section ?? "Section interne"}
+                        {chunk.page ? ` · Page ${chunk.page}` : ""}
+                        {chunk.paragraph ? ` · § ${chunk.paragraph}` : ""}
+                      </p>
+                      <p className="mp-text-wrap mt-2 text-sm leading-relaxed text-foreground/80">
+                        {chunk.text}
+                      </p>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           ) : (
             <EmptyState
-              title="Selectionnez un document"
+              title="Sélectionnez un document"
               description="Le panneau de droite affiche le statut, les chunks et les actions de publication superadmin."
               icon={<FileText size={18} />}
             />
