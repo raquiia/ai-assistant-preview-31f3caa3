@@ -45,11 +45,6 @@ const nav: Array<{ key: ViewKey; label: string; icon: typeof Bot; roles: Role[] 
 const SESSION_KEY = "mp-session";
 const NAV_KEY = "mp-nav-collapsed";
 
-function readStoredSession(): Session | null {
-  if (typeof window === "undefined") return null;
-  const stored = window.localStorage.getItem(SESSION_KEY);
-  return stored ? (JSON.parse(stored) as Session) : null;
-}
 
 export function MpApp() {
   const [hydrated, setHydrated] = useState(false);
