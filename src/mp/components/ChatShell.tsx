@@ -119,6 +119,10 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
     const trimmed = (textOverride ?? question).trim();
     if (!trimmed || loading) return;
     setLoading(true);
+    setStreamingText("");
+    setStreamingSources([]);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       let conversationId = activeId;
       if (!conversationId) {
@@ -143,19 +147,49 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
       };
       setMessages((prev) => [...prev, optimistic]);
 
-      const answer = await api.post<ChatAnswerPayload>(`/chat/conversations/${conversationId}/messages`, {
-        content: trimmed,
+      // Wave 6.D — stream SSE token par token.
+      let finalPayload: ChatAnswerPayload | null = null;
+      let acc = "";
+      for await (const evt of api.streamChat({
+        conversationId,
+        question: trimmed,
         industryTags: filters.industryTags,
         pmDomainTags: filters.pmDomainTags,
-      });
-      await loadConversation(conversationId);
-      setLastAnswer(answer);
-      await refreshConversations();
+        signal: controller.signal,
+      })) {
+        if (evt.type === "token") {
+          acc += evt.delta;
+          setStreamingText(acc);
+        } else if (evt.type === "sources") {
+          setStreamingSources(evt.sources);
+        } else if (evt.type === "done") {
+          finalPayload = evt.payload;
+        } else if (evt.type === "error") {
+          throw new Error(evt.message);
+        }
+      }
+
+      if (finalPayload) {
+        setLastAnswer(finalPayload);
+        await loadConversation(conversationId);
+        await refreshConversations();
+      }
     } catch (e) {
-      toast.error("La réponse a échoué", { description: e instanceof Error ? e.message : undefined });
+      if ((e as Error)?.name === "AbortError") {
+        toast.message("Génération interrompue");
+      } else {
+        toast.error("La réponse a échoué", { description: e instanceof Error ? e.message : undefined });
+      }
     } finally {
+      setStreamingText("");
+      setStreamingSources([]);
+      abortRef.current = null;
       setLoading(false);
     }
+  }
+
+  function stopStream() {
+    abortRef.current?.abort();
   }
 
   async function retryFallback() {
