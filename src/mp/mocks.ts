@@ -1005,10 +1005,7 @@ export function handleMock<T>(
   }
   if (method === "POST" && path === "/kb/upload") {
     if (session?.user.role !== "SUPER_ADMIN") throw new Error("403 — Seul le Super Admin peut uploader des documents");
-    const title =
-      body instanceof FormData
-        ? String(body.get("title") ?? "Document")
-        : ((body as { title?: string })?.title ?? "Document");
+    const { title, industryTags, pmDomainTags } = extractUploadFields(body);
     const doc: DocumentRecord = {
       id: id("d"),
       title,
@@ -1020,6 +1017,8 @@ export function handleMock<T>(
       checksum: "mock",
       language: "fr",
       createdAt: now(),
+      industryTags,
+      pmDomainTags,
     };
     documents.unshift(doc);
     return { document: doc } as T;
