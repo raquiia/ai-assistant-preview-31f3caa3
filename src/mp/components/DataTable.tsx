@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-export function DataTable<T extends { id?: string } | Record<string, unknown>>({
+export function DataTable<T>({
   columns,
   rows,
   getKey,
