@@ -101,6 +101,8 @@ export interface DocumentRecord {
   checksum: string;
   language: string;
   createdAt: string;
+  industryTags?: string[];
+  pmDomainTags?: string[];
 }
 
 export interface SourceCitation {
