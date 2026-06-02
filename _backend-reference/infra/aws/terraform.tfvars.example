@@ -1,0 +1,32 @@
+aws_region   = "eu-west-3"
+project_name = "migso-pcubed"
+environment  = "dev"
+vpc_cidr     = "10.0.0.0/16"
+
+# CORS + OAuth — replace with your real origins / callback URLs once you have a domain.
+web_allowed_origins = ["http://localhost:5173"]
+web_callback_urls   = ["http://localhost:5173/callback"]
+web_logout_urls     = ["http://localhost:5173"]
+
+# Leave empty on first deploy. After you point a domain, set web_domain and
+# create an ACM cert in us-east-1 for CloudFront + one in your region for the ALB.
+web_domain                 = ""
+cloudfront_certificate_arn = ""
+acm_certificate_arn        = ""
+
+# RDS — Multi-AZ + deletion protection enabled for dev safety. Tune for cost.
+rds_instance_class      = "db.t4g.medium"
+rds_multi_az            = true
+rds_deletion_protection = true
+
+# Service sizing
+api_cpu              = 512
+api_memory           = 1024
+api_desired_count    = 2
+api_max_capacity     = 6
+worker_cpu           = 512
+worker_memory        = 1024
+worker_desired_count = 1
+
+# Optional: subscribe to alarm SNS topic.
+alarm_email = ""
