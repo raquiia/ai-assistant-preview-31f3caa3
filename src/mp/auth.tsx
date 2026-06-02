@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { ApiClient } from "./api";
 import { authProvider } from "./auth/index";
 import type { Session } from "./types";
+import { setObservabilityUser } from "@/lib/observability";
 
 interface AuthContextValue {
   session: Session | null;
@@ -29,6 +30,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const setSession = (next: Session | null) => {
     setSessionState(next);
+    // Wave 6.F — identifie l'utilisateur dans Sentry pour corrélation traceId ↔ user
+    setObservabilityUser(next ? { id: next.user.id, email: next.user.email, role: next.user.role } : null);
     if (typeof window === "undefined") return;
     if (next) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     else window.localStorage.removeItem(STORAGE_KEY);

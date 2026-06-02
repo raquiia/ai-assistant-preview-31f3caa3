@@ -8,9 +8,18 @@
 import { handleMock, buildAnswerForStream } from "./mocks";
 import type { Session, ChatAnswerPayload } from "./types";
 import type { SourceCitation } from "./shared";
+import { captureApiError, newTraceId } from "@/lib/observability";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 const USE_MOCKS = (import.meta.env.VITE_USE_MOCKS ?? "true") !== "false";
+
+/** Wave 6.F — erreur API enrichie d'un traceId pour corrélation backend/Sentry. */
+export class ApiError extends Error {
+  constructor(message: string, public readonly traceId: string, public readonly status?: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
 /** Wave 6.D — événements SSE émis par /chat/.../messages/stream. */
 export type StreamEvent =
@@ -51,18 +60,32 @@ export class ApiClient {
     }
 
     const session = this.getSession();
+    const method = (init.method ?? "GET").toUpperCase();
+    const traceId = newTraceId();
     const headers = new Headers(init.headers);
     if (!headers.has("Content-Type") && !(init.body instanceof FormData))
       headers.set("Content-Type", "application/json");
     if (session?.accessToken) headers.set("Authorization", `Bearer ${session.accessToken}`);
-    const response = await fetch(`${API_URL}${path}`, { ...init, headers });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(text || `Request failed: ${response.status}`);
+    // Wave 6.F — propage le traceId au backend (repris dans pino + Sentry server).
+    headers.set("X-Trace-Id", traceId);
+    try {
+      const response = await fetch(`${API_URL}${path}`, { ...init, headers });
+      // Le backend peut renvoyer un traceId différent (s'il l'a généré) — on garde le sien.
+      const serverTraceId = response.headers.get("X-Trace-Id") ?? traceId;
+      if (!response.ok) {
+        const text = await response.text();
+        const err = new ApiError(text || `Request failed: ${response.status}`, serverTraceId, response.status);
+        captureApiError(err, { path, method, traceId: serverTraceId });
+        throw err;
+      }
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) return (await response.text()) as T;
+      return response.json() as Promise<T>;
+    } catch (e) {
+      if (e instanceof ApiError) throw e;
+      captureApiError(e, { path, method, traceId });
+      throw e;
     }
-    const contentType = response.headers.get("content-type") ?? "";
-    if (!contentType.includes("application/json")) return (await response.text()) as T;
-    return response.json() as Promise<T>;
   }
 
   get<T>(path: string): Promise<T> {

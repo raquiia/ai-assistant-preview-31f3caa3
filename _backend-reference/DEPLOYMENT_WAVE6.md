@@ -145,3 +145,47 @@ le client simule le stream à ~12 ms/token à partir de `buildAnswerForStream`.
 - Bulle assistant qui se remplit progressivement (caret clignotant).
 - Bouton Stop (AbortController) qui interrompt le flux côté client.
 - Sources rendues dès `event: sources` (rail latéral live).
+
+---
+
+## Wave 6.F — Sentry front + traceId (IMPLÉMENTÉ)
+
+**Front** (`src/lib/observability.ts`) :
+- `initObservability()` activé dans `__root.tsx` (no-op si `VITE_SENTRY_DSN` absent).
+- `newTraceId()` génère un ID 16 octets hex (compatible W3C trace-context) par requête.
+- `ApiClient` (`src/mp/api.ts`) :
+  - Envoie `X-Trace-Id` sur chaque appel HTTP.
+  - Capture les erreurs HTTP via `captureApiError()` avec tag `traceId`.
+  - Nouvelle classe `ApiError` (expose `traceId` + `status`).
+- `AuthProvider` appelle `setObservabilityUser()` à chaque login/logout (corrélation user ↔ erreurs).
+- `ChatShell` : le toast d'erreur affiche les 16 premiers caractères du traceId (support L1 le copie-colle dans Sentry/CloudWatch).
+
+**Backend à brancher** (`_backend-reference/apps/api/src/plugins/traceId.ts`) :
+- `onRequest` hook reprend `X-Trace-Id` (ou en génère un), l'attache à pino + Sentry scope, le renvoie en réponse.
+- À enregistrer **avant** `requireAuth` pour avoir le traceId sur les 401 aussi.
+
+**Env vars Vite** (à pousser via CI) :
+```
+VITE_SENTRY_DSN=https://xxx@xxx.ingest.sentry.io/yyy
+VITE_ENV=prod
+VITE_RELEASE=<git-sha>
+```
+
+---
+
+## Wave 6.G — /healthz + ECS auto-scaling
+
+- `_backend-reference/apps/api/src/routes/health.ts` : `/healthz` (liveness, 200 systématique) + `/readyz` (PG + OpenSearch + Dynamo, 503 si dégradé). **Aucune auth.**
+- `_backend-reference/infra/aws/ecs-autoscaling.tf` :
+  - min=2 (HA inter-AZ), max=20.
+  - Target tracking : CPU 60% + ALB 200 req/min/task.
+  - Scale-out cooldown 60 s, scale-in 300 s (anti-flap pendant les SSE longs).
+- ALB target group : `health_check.path = "/healthz"`, interval 15 s, threshold 2/3.
+
+---
+
+## Wave 6.I — FinOps tagging + AWS Budgets
+
+- `_backend-reference/infra/aws/finops-tags.tf` : `default_tags` sur le provider AWS (Project, Environment, Owner, CostCenter, DataClass, Compliance). **À activer manuellement** dans Billing → Cost Allocation Tags après 1er deploy.
+- `_backend-reference/infra/aws/aws-budgets.tf` : 3 budgets (global 1500 €/mois, Bedrock 40%, OpenSearch 30%) avec notifs SNS → email à 50/80/100%.
+- Couplage applicatif : la logique de cut-off per-user reste dans `services/budgets.ts` (Wave 5) — AWS Budgets ne fait que l'alerte infra.
