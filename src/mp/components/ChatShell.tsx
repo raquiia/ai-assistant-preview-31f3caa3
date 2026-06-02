@@ -204,7 +204,8 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
   }
 
   const activeConv = useMemo(() => conversations.find((c) => c.id === activeId) ?? null, [activeId, conversations]);
-  const shownSources: SourceCitation[] = lastAnswer?.sources ?? [];
+  const shownSources: SourceCitation[] =
+    lastAnswer?.sources ?? (streamingSources.length ? streamingSources : []);
   const hasSources = shownSources.length > 0;
 
   return (
