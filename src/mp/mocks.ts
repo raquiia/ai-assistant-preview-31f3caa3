@@ -1342,6 +1342,10 @@ export function handleMock<T>(
       }),
       { cost: 0, tokensIn: 0, tokensOut: 0, requests: 0 },
     );
+    const stats = getLlmCacheStats();
+    // Si l'utilisateur n'a pas (encore) testé deux fois la même question dans
+    // cette session, on simule un hit-rate plausible (28 %) pour la démo.
+    const hitRate = stats.hits + stats.misses < 4 ? 0.28 : stats.hitRate;
     return {
       series,
       totals: { ...totals, cost: Number(totals.cost.toFixed(2)) },
@@ -1351,8 +1355,17 @@ export function handleMock<T>(
         { model: "amazon.titan-embed-text-v2", cost: 3.2, tokens: 1_240_000, requests: 412, share: 0.07 },
         { model: "mistral.mistral-large", cost: 6.62, tokens: 84_000, requests: 21, share: 0.14 },
       ],
+      cache: {
+        hitRate,
+        hits: stats.hits,
+        misses: stats.misses,
+        entries: stats.entries,
+        savedCost: Number((hitRate * totals.cost * 0.9).toFixed(2)),
+        savedLatencyMsAvg: 395,
+      },
     } as T;
   }
+
 
   if (method === "GET" && path === "/me/models") {
     const role = session?.user.role ?? "CONSULTANT";
