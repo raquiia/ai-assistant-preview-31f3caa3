@@ -68,9 +68,10 @@ function initials(name: string): string {
 }
 
 export function AppSidebar({ view, onChangeView }: { view: ViewKey; onChangeView: (v: ViewKey) => void }) {
-  const { session, logout } = useAuth();
+  const { session, logout, api } = useAuth();
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
+  const [pendingApprovals, setPendingApprovals] = useState(0);
 
   const items = useMemo(
     () => (session ? NAV.filter((n) => n.roles.includes(session.user.role)) : []),
@@ -79,7 +80,33 @@ export function AppSidebar({ view, onChangeView }: { view: ViewKey; onChangeView
   const workItems = items.filter((i) => i.group === "work");
   const adminItems = items.filter((i) => i.group === "admin");
 
+  useEffect(() => {
+    if (!session) return;
+    if (!(session.user.role === "MANAGER" || session.user.role === "SUPER_ADMIN")) return;
+    let cancelled = false;
+    const fetchCount = () => {
+      api
+        .get<{ count: number }>("/notifications/pending-count")
+        .then((p) => {
+          if (!cancelled) setPendingApprovals(p?.count ?? 0);
+        })
+        .catch(() => undefined);
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 20_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [api, session, view]);
+
   if (!session) return null;
+
+  const badgeFor = (item: NavItem): number => {
+    if (item.badgeKey === "approvals") return pendingApprovals;
+    return 0;
+  };
+
 
   return (
     <Sidebar collapsible="icon" className="border-r">
