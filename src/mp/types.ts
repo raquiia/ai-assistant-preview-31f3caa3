@@ -71,7 +71,9 @@ export type ViewKey =
   | "kb"
   | "prompts"
   | "audit"
-  | "embed";
+  | "embed"
+  | "approvals";
+
 
 export interface FeedbackRequest {
   rating: FeedbackRating;
