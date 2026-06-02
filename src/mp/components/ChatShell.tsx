@@ -60,8 +60,13 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
   const [loading, setLoading] = useState(false);
   const [showConversations, setShowConversations] = useState(false);
   const [showSources, setShowSources] = useState(false);
+  const [filters, setFilters] = useState<ChatFilters>(() => loadFilters());
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    try { window.localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(filters)); } catch {}
+  }, [filters]);
 
   useEffect(() => { void refreshConversations(); }, []);
   useEffect(() => {
