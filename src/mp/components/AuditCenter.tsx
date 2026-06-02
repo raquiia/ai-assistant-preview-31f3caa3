@@ -38,13 +38,15 @@ import { toast } from "sonner";
 
 interface SystemCardPayload {
   systemCard: {
-    purpose: string;
-    users: string[];
-    dataProcessed: string[];
-    models: Array<{ provider: string; model: string; active: boolean }>;
-    risks: string[];
-    controls: string[];
-    reviewedAt: string;
+    purpose?: string;
+    users?: string[];
+    dataProcessed?: string[];
+    dataSources?: string[];
+    models?: Array<{ provider: string; model: string; active: boolean }>;
+    risks?: string[];
+    controls?: string[];
+    mitigations?: string[];
+    reviewedAt?: string;
   };
 }
 
@@ -61,7 +63,7 @@ export function AuditCenter({ api }: { api: ApiClient }) {
   useEffect(() => {
     api
       .get<{ events?: AuditEvent[] }>("/superadmin/audit/events")
-      .then((payload) => setEvents(payload?.events ?? []))
+      .then((payload) => setEvents(Array.isArray(payload?.events) ? payload.events : []))
       .catch(() => setEvents([]));
     api
       .get<SystemCardPayload>("/superadmin/compliance/system-card")
@@ -104,11 +106,16 @@ export function AuditCenter({ api }: { api: ApiClient }) {
   }, [query, actionFilter]);
 
   async function exportCompliance() {
-    const payload = await api.post<{ exportedAt: string }>(
-      "/superadmin/compliance/export",
-      {},
-    );
-    toast.success(`Export conformité généré le ${new Date(payload.exportedAt).toLocaleString()}`);
+    try {
+      const payload = await api.post<{ exportedAt?: string; url?: string }>(
+        "/superadmin/compliance/export",
+        {},
+      );
+      const exportedAt = payload.exportedAt ?? new Date().toISOString();
+      toast.success(`Export conformité généré le ${new Date(exportedAt).toLocaleString()}`);
+    } catch {
+      toast.error("Impossible de générer l'export conformité");
+    }
   }
 
   function downloadEventsJson() {
@@ -194,9 +201,9 @@ export function AuditCenter({ api }: { api: ApiClient }) {
           </div>
           {card ? (
             <div className="grid gap-3 md:grid-cols-3">
-              <InfoBlock label="Finalité" value={card.purpose} />
-              <InfoBlock label="Données" value={card.dataProcessed.join(", ")} />
-              <InfoBlock label="Contrôles" value={card.controls.join(", ")} />
+              <InfoBlock label="Finalité" value={card.purpose ?? "—"} />
+              <InfoBlock label="Données" value={formatList(card.dataProcessed ?? card.dataSources)} />
+              <InfoBlock label="Contrôles" value={formatList(card.controls ?? card.mitigations)} />
             </div>
           ) : (
             <EmptyState
