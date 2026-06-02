@@ -40,6 +40,22 @@ export function SourceCards({ sources, onOpen }: { sources: SourceCitation[]; on
                 <div className={`h-full rounded-full transition-all ${tone.bar}`} style={{ width: `${score}%` }} />
               </div>
               <p className="mp-text-wrap mt-2 line-clamp-2 text-xs leading-relaxed text-muted-foreground/90">{source.excerpt}</p>
+              {(source.industryTags?.length || source.pmDomainTags?.length) ? (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {source.industryTags?.map((t) => (
+                    <span key={`i-${t}`} className="rounded-full border border-primary/20 bg-primary/5 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+                      {labelForIndustry(t)}
+                    </span>
+                  ))}
+                  {source.pmDomainTags?.map((t) => (
+                    <span key={`d-${t}`} className="rounded-full border border-muted-foreground/20 bg-muted/60 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
+                      {labelForPmDomain(t)}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <span className="mt-2 inline-block text-[9px] uppercase tracking-wider text-muted-foreground/70">Générique</span>
+              )}
             </div>
             <ChevronRight className="size-4 shrink-0 self-center text-muted-foreground opacity-0 transition group-hover:opacity-100" />
           </button>
