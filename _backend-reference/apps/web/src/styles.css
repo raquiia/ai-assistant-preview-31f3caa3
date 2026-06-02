@@ -1,0 +1,109 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif;
+  background: #f8fafc;
+  color: #111827;
+  letter-spacing: 0;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --mp-border: rgba(148, 163, 184, 0.32);
+  --mp-border-strong: rgba(148, 163, 184, 0.55);
+  --mp-surface: rgba(255, 255, 255, 0.88);
+  --mp-surface-solid: #ffffff;
+  --mp-muted: #64748b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(226, 240, 249, 0.74), rgba(248, 250, 252, 0.94) 280px),
+    #f8fafc;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  touch-action: manipulation;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 2px solid #1db7e8;
+  outline-offset: 2px;
+}
+
+.mp-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #a7bfd2 transparent;
+}
+
+.mp-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.mp-scrollbar::-webkit-scrollbar-thumb {
+  background: #a7bfd2;
+  border-radius: 8px;
+}
+
+.mp-text-wrap {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.mp-card {
+  background: var(--mp-surface-solid);
+  border: 1px solid var(--mp-border);
+  border-radius: 8px;
+  box-shadow: 0 12px 36px rgba(6, 29, 58, 0.06);
+}
+
+.mp-card-soft {
+  background: var(--mp-surface);
+  border: 1px solid var(--mp-border);
+  backdrop-filter: blur(18px);
+}
+
+.mp-surface {
+  background: var(--mp-surface-solid);
+  border: 1px solid var(--mp-border);
+  border-radius: 8px;
+}
+
+.mp-surface-strong {
+  background: #fff;
+  border: 1px solid var(--mp-border-strong);
+  border-radius: 8px;
+}
+
+.mp-muted {
+  color: var(--mp-muted);
+}

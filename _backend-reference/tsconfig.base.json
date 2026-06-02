@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noUncheckedIndexedAccess": true,
+    "baseUrl": ".",
+    "paths": {
+      "@mp/shared": ["packages/shared/src/index.ts"],
+      "@mp/config": ["packages/config/src/index.ts"],
+      "@mp/rag": ["packages/rag/src/index.ts"],
+      "@mp/ai": ["packages/ai/src/index.ts"]
+    }
+  }
+}
