@@ -506,17 +506,71 @@ function sessionFor(email: string): Session | null {
   };
 }
 
+// Wave 6.E — mémoire-cache LLM simulé (clé = question normalisée + filtres).
+// Reproduit le comportement DynamoDB de _backend-reference/.../llmCache.ts :
+// 1er appel → MISS (fresh), 2e appel identique → HIT (latence ~25 ms, coût 0).
+interface CachedAnswer {
+  payload: ChatAnswerPayload;
+  storedAt: number;
+}
+const llmCacheMock = new Map<string, CachedAnswer>();
+let cacheHits = 0;
+let cacheMisses = 0;
+
+function buildCacheKey(
+  question: string,
+  filters?: { industryTags?: string[]; pmDomainTags?: string[] },
+): string {
+  const norm = question.toLowerCase().normalize("NFKD").replace(/\s+/g, " ").trim();
+  const f = JSON.stringify({
+    i: [...(filters?.industryTags ?? [])].sort(),
+    d: [...(filters?.pmDomainTags ?? [])].sort(),
+  });
+  // pseudo-sha256 (ok pour mock — la vraie clé est calculée côté API)
+  let h = 0;
+  const s = `${norm}|${f}`;
+  for (let i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return `mock-${(h >>> 0).toString(16).padStart(8, "0")}${"0".repeat(56)}`;
+}
+
+const VOLATILE = /\b(today|now|yesterday|tomorrow|aujourd'hui|hier|demain|maintenant)\b/i;
+
 function buildAnswer(
   question: string,
   filters?: { industryTags?: string[]; pmDomainTags?: string[] },
 ): ChatAnswerPayload {
+  const key = buildCacheKey(question, filters);
+  const bypass = VOLATILE.test(question);
+  if (!bypass) {
+    const hit = llmCacheMock.get(key);
+    if (hit) {
+      cacheHits += 1;
+      const ageSeconds = Math.max(0, Math.floor((Date.now() - hit.storedAt) / 1000));
+      // Clone pour ne pas muter l'entrée cache + ajuste les marqueurs cache hit.
+      const cloned: ChatAnswerPayload = {
+        ...hit.payload,
+        response: { ...hit.payload.response, id: id("r"), latencyMs: 25, createdAt: now() },
+        usage: {
+          ...hit.payload.usage,
+          id: id("u"),
+          inputTokens: 0,
+          outputTokens: 0,
+          cachedTokens: hit.payload.usage.inputTokens + hit.payload.usage.outputTokens,
+          estimatedCost: 0,
+        },
+        cache: { hit: true, key, ageSeconds },
+      };
+      return cloned;
+    }
+  }
+  cacheMisses += 1;
   const responseId = id("r");
   const sources = mockSources(filters);
   const orientation =
     filters && ((filters.industryTags?.length ?? 0) + (filters.pmDomainTags?.length ?? 0) > 0)
       ? ` (orientée ${[...(filters.industryTags ?? []), ...(filters.pmDomainTags ?? [])].join(", ")})`
       : "";
-  return {
+  const fresh: ChatAnswerPayload = {
     response: {
       id: responseId,
       messageId: id("m"),
@@ -546,8 +600,25 @@ function buildAnswer(
       industryTags: filters?.industryTags ?? [],
       pmDomainTags: filters?.pmDomainTags ?? [],
     },
+    cache: bypass
+      ? undefined
+      : { hit: false, key, ageSeconds: 0 },
+  };
+  if (!bypass) llmCacheMock.set(key, { payload: fresh, storedAt: Date.now() });
+  return fresh;
+}
+
+/** Expose cache hit-rate to dashboards (Wave 6.E). */
+export function getLlmCacheStats() {
+  const total = cacheHits + cacheMisses;
+  return {
+    hits: cacheHits,
+    misses: cacheMisses,
+    hitRate: total === 0 ? 0 : cacheHits / total,
+    entries: llmCacheMock.size,
   };
 }
+
 
 // path matcher helpers
 function match(path: string, pattern: string): Record<string, string> | null {
@@ -1271,6 +1342,10 @@ export function handleMock<T>(
       }),
       { cost: 0, tokensIn: 0, tokensOut: 0, requests: 0 },
     );
+    const stats = getLlmCacheStats();
+    // Si l'utilisateur n'a pas (encore) testé deux fois la même question dans
+    // cette session, on simule un hit-rate plausible (28 %) pour la démo.
+    const hitRate = stats.hits + stats.misses < 4 ? 0.28 : stats.hitRate;
     return {
       series,
       totals: { ...totals, cost: Number(totals.cost.toFixed(2)) },
@@ -1280,8 +1355,17 @@ export function handleMock<T>(
         { model: "amazon.titan-embed-text-v2", cost: 3.2, tokens: 1_240_000, requests: 412, share: 0.07 },
         { model: "mistral.mistral-large", cost: 6.62, tokens: 84_000, requests: 21, share: 0.14 },
       ],
+      cache: {
+        hitRate,
+        hits: stats.hits,
+        misses: stats.misses,
+        entries: stats.entries,
+        savedCost: Number((hitRate * totals.cost * 0.9).toFixed(2)),
+        savedLatencyMsAvg: 395,
+      },
     } as T;
   }
+
 
   if (method === "GET" && path === "/me/models") {
     const role = session?.user.role ?? "CONSULTANT";
