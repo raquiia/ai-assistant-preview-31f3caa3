@@ -307,6 +307,9 @@ function DocumentList({
   canEdit: boolean;
   onUpdateTags: (id: string, ind: string[], dom: string[]) => Promise<void>;
 }) {
+  const PAGE_SIZE = 12;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return documents.filter((d) => {
@@ -318,6 +321,12 @@ function DocumentList({
     });
   }, [documents, search, statusFilter, filterInd, filterDom]);
 
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [search, statusFilter, filterInd, filterDom]);
+
+  const visible = filtered.slice(0, visibleCount);
+  const remaining = filtered.length - visible.length;
   const activeFilters = filterInd.length + filterDom.length;
 
   return (
@@ -430,7 +439,8 @@ function DocumentList({
           </PopoverContent>
         </Popover>
         <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-          {filtered.length} / {documents.length}
+          {visible.length} / {filtered.length}
+          {filtered.length !== documents.length ? ` (sur ${documents.length})` : ""}
         </span>
       </div>
 
@@ -439,18 +449,35 @@ function DocumentList({
           Aucun document ne correspond aux filtres.
         </div>
       ) : (
-        <div className="space-y-2">
-          {filtered.map((doc) => (
-            <DocumentCard
-              key={doc.id}
-              doc={doc}
-              selected={doc.id === selectedId}
-              onClick={() => onInspect(doc.id)}
-              canEdit={canEdit}
-              onUpdateTags={(ind, dom) => onUpdateTags(doc.id, ind, dom)}
-            />
-          ))}
-        </div>
+        <>
+          <div className="space-y-2">
+            {visible.map((doc) => (
+              <DocumentCard
+                key={doc.id}
+                doc={doc}
+                selected={doc.id === selectedId}
+                onClick={() => onInspect(doc.id)}
+                canEdit={canEdit}
+                onUpdateTags={(ind, dom) => onUpdateTags(doc.id, ind, dom)}
+              />
+            ))}
+          </div>
+          {remaining > 0 && (
+            <div className="flex items-center justify-center pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                className="gap-2"
+              >
+                Afficher plus
+                <span className="text-xs text-muted-foreground">
+                  ({Math.min(PAGE_SIZE, remaining)} de plus · {remaining} restant{remaining > 1 ? "s" : ""})
+                </span>
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
