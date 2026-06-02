@@ -1,3 +1,9 @@
+// Polyfill `global` for browser — amazon-cognito-identity-js depends on the
+// Node `buffer` package which references `global` at module init.
+if (typeof globalThis !== "undefined" && typeof (globalThis as { global?: unknown }).global === "undefined") {
+  (globalThis as { global: unknown }).global = globalThis;
+}
+
 import {
   AuthenticationDetails,
   CognitoUser,
