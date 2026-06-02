@@ -151,69 +151,20 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
           )}
 
           {documents.length ? (
-            <DataTable
-              rows={documents}
-              getKey={(row) => row.id}
-              onRowClick={(row) => void inspect(row.id)}
-              columns={[
-                {
-                  key: "title",
-                  header: "Document",
-                  render: (row) => (
-                    <div className="flex items-center gap-2 font-medium text-foreground">
-                      <FileText size={15} className="shrink-0 text-primary" />
-                      <span className="truncate">{row.title}</span>
-                    </div>
-                  ),
-                },
-                { key: "mimeType", header: "Type", render: (row) => (
-                  <span className="font-mono text-xs text-muted-foreground">{row.mimeType}</span>
-                ) },
-                {
-                  key: "tags",
-                  header: "Tags",
-                  render: (row) => (
-                    <div className="flex items-center gap-1.5">
-                      <div className="min-w-0 flex-1">
-                        <TagList
-                          industryTags={row.industryTags ?? []}
-                          pmDomainTags={row.pmDomainTags ?? []}
-                          max={3}
-                        />
-                      </div>
-                      {session.user.role === "SUPER_ADMIN" && (
-                        <span onClick={(e) => e.stopPropagation()}>
-                          <TagEditor
-                            industryTags={row.industryTags ?? []}
-                            pmDomainTags={row.pmDomainTags ?? []}
-                            onSave={(ind, dom) => updateTags(row.id, ind, dom)}
-                          />
-                        </span>
-                      )}
-                    </div>
-                  ),
-                },
-                {
-                  key: "status",
-                  header: "Statut",
-                  render: (row) => (
-                    <Badge variant={statusVariant(row.status)} className="rounded-full">
-                      {row.status}
-                    </Badge>
-                  ),
-                },
-                { key: "version", header: "Version" },
-                { key: "language", header: "Langue" },
-                {
-                  key: "createdAt",
-                  header: "Date",
-                  render: (row) => (
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(row.createdAt).toLocaleString()}
-                    </span>
-                  ),
-                },
-              ]}
+            <DocumentList
+              documents={documents}
+              selectedId={selected?.document.id}
+              search={search}
+              setSearch={setSearch}
+              statusFilter={statusFilter}
+              setStatusFilter={setStatusFilter}
+              filterInd={filterInd}
+              setFilterInd={setFilterInd}
+              filterDom={filterDom}
+              setFilterDom={setFilterDom}
+              onInspect={(id) => void inspect(id)}
+              canEdit={session.user.role === "SUPER_ADMIN"}
+              onUpdateTags={updateTags}
             />
           ) : (
             <EmptyState
