@@ -206,6 +206,21 @@ function mockSources(filters?: { industryTags?: string[]; pmDomainTags?: string[
   return filterSources(filters);
 }
 
+function extractUploadFields(body: unknown): { title: string; industryTags: string[]; pmDomainTags: string[] } {
+  if (body instanceof FormData) {
+    const title = String(body.get("title") ?? body.get("file") ?? "Document");
+    const ind = body.getAll("industryTags").map(String).filter(Boolean);
+    const dom = body.getAll("pmDomainTags").map(String).filter(Boolean);
+    return { title, industryTags: ind, pmDomainTags: dom };
+  }
+  const b = (body ?? {}) as { title?: string; industryTags?: string[]; pmDomainTags?: string[] };
+  return {
+    title: b.title ?? "Document",
+    industryTags: Array.isArray(b.industryTags) ? b.industryTags : [],
+    pmDomainTags: Array.isArray(b.pmDomainTags) ? b.pmDomainTags : [],
+  };
+}
+
 const documents: DocumentRecord[] = [
   {
     id: "d-1",
