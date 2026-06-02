@@ -223,6 +223,55 @@ const providers: AiProviderConfig[] = [
   },
 ];
 
+const appSettings: import("./shared").AppSettings = {
+  topK: 6,
+  minRelevanceScore: 0.65,
+  qualityThreshold: 0.7,
+  rerankerEnabled: true,
+  rerankerModel: "cohere-rerank-3",
+  embeddingModel: "text-embedding-3-large",
+  contextWindowTokens: 8000,
+  maxHistoryTurns: 8,
+  webFallbackEnabled: false,
+  temperature: 0.2,
+  topP: 0.95,
+  maxTokens: 800,
+  presencePenalty: 0,
+  frequencyPenalty: 0,
+  seed: null,
+  stopSequences: [],
+  streaming: true,
+  responseFormat: "text",
+  timeoutMs: 30000,
+  reasoningEffort: "medium",
+  verbosity: "balanced",
+  defaultModel: "google/gemini-3-flash-preview",
+  fallbackModel: "openai/gpt-5-mini",
+  fallbackTriggers: ["timeout", "rate_limit", "credit_exhausted"],
+  mistralModel: "mistral-large-latest",
+  openAiModel: "gpt-4o-mini",
+  searchProvider: "mock",
+  forbiddenTopics: ["données personnelles clients", "secrets commerciaux non publics"],
+  piiRedaction: true,
+  piiRedactionLevel: "standard",
+  safetyThreshold: "medium",
+  refusalTemplate:
+    "Je ne peux pas répondre à cette demande. Contactez votre manager pour une assistance humaine.",
+  logUserMessagesPlaintext: false,
+  dailyTokenBudget: 2_000_000,
+  monthlyCostCapEur: 1500,
+  requestsPerMinutePerUser: 20,
+  budgetAlertThreshold: 80,
+  allowedModelsByRole: {
+    CONSULTANT: ["google/gemini-3-flash-preview", "google/gemini-2.5-flash"],
+    MANAGER: ["google/gemini-3-flash-preview", "openai/gpt-5-mini", "google/gemini-2.5-pro"],
+    SUPER_ADMIN: ["*"],
+    AUDITOR: ["google/gemini-3-flash-preview"],
+  },
+  allowedEmbedOrigins: ["https://intranet.migso-pcubed.local"],
+};
+
+
 const auditEvents: AuditEvent[] = [
   {
     id: "a-1",
@@ -769,22 +818,19 @@ export function handleMock<T>(
     return { provider: prov } as T;
   }
   if (method === "GET" && path === "/admin/settings")
-    return {
-      settings: {
-        topK: 6,
-        minRelevanceScore: 0.65,
-        qualityThreshold: 0.7,
-        temperature: 0.2,
-        maxTokens: 800,
-        reasoningEffort: "medium",
-        verbosity: "balanced",
-        allowedEmbedOrigins: ["https://intranet.migso-pcubed.local"],
-        mistralModel: "mistral-large-latest",
-        openAiModel: "gpt-4o-mini",
-        searchProvider: "mock",
-      },
-    } as T;
-  if (method === "PATCH" && path === "/admin/settings") return { ok: true } as T;
+    return { settings: appSettings } as T;
+  if (method === "PATCH" && path === "/admin/settings") {
+    Object.assign(appSettings, (body ?? {}) as Record<string, unknown>);
+    return { ok: true, settings: appSettings } as T;
+  }
+  m = match(path, "/admin/providers/:id/test");
+  if (method === "POST" && m) {
+    const prov = providers.find((p) => p.id === m!.id);
+    if (!prov) throw new Error("Provider introuvable");
+    const ok = Boolean(prov.encryptedApiKeyRef || prov.maskedKey);
+    return { ok, latencyMs: 120 + Math.floor(Math.random() * 240), checkedAt: now() } as T;
+  }
+
 
   // AUDIT
   if (method === "GET" && path.startsWith("/admin/audit")) {

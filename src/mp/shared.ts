@@ -152,15 +152,50 @@ export interface AuditEvent {
 }
 
 export interface AppSettings {
+  // RAG
   topK: number;
   minRelevanceScore: number;
   qualityThreshold: number;
+  rerankerEnabled: boolean;
+  rerankerModel: string;
+  embeddingModel: string;
+  contextWindowTokens: number;
+  maxHistoryTurns: number;
+  webFallbackEnabled: boolean;
+  // Inférence
   temperature: number;
+  topP: number;
   maxTokens: number;
+  presencePenalty: number;
+  frequencyPenalty: number;
+  seed: number | null;
+  stopSequences: string[];
+  streaming: boolean;
+  responseFormat: "text" | "json" | "structured";
+  timeoutMs: number;
   reasoningEffort: "minimal" | "low" | "medium" | "high";
   verbosity: "concise" | "balanced" | "detailed";
-  allowedEmbedOrigins: string[];
+  // Modèles
+  defaultModel: string;
+  fallbackModel: string;
+  fallbackTriggers: Array<"timeout" | "rate_limit" | "credit_exhausted" | "server_error">;
   mistralModel: string;
   openAiModel: string;
   searchProvider: "mock" | "openai_hosted" | "tavily" | "serpapi" | "none";
+  // Garde-fous
+  forbiddenTopics: string[];
+  piiRedaction: boolean;
+  piiRedactionLevel: "standard" | "strict";
+  safetyThreshold: "low" | "medium" | "high";
+  refusalTemplate: string;
+  logUserMessagesPlaintext: boolean;
+  // Budget & quotas
+  dailyTokenBudget: number;
+  monthlyCostCapEur: number;
+  requestsPerMinutePerUser: number;
+  budgetAlertThreshold: number;
+  allowedModelsByRole: Record<"CONSULTANT" | "MANAGER" | "SUPER_ADMIN" | "AUDITOR", string[]>;
+  // Embed
+  allowedEmbedOrigins: string[];
 }
+

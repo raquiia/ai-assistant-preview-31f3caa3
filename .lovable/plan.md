@@ -1,141 +1,105 @@
+## Audit de l'existant
 
-# Refonte front MIGSO-PCUBED AI Assistant
+**Onglet Prompt système** (`PromptEditor`) — déjà présent :
+- Nom, instruction de base, ton (4 valeurs)
+- Toggle Web search
+- 6 politiques textuelles : sources, code de conduite, escalade, citations, langue, structure de réponse
+- Versionning + rollback
 
-Choix design verrouillés : **Cloud White** (accent `#3b82f6`) · **Sora + Manrope** · **Sidebar + main** · **Light par défaut + toggle dark**.
+**Onglet Providers & secrets** (`ApiKeyManager`) — minimal :
+- provider (mistral / openai / search), model (texte libre), apiKey
+- Liste des providers enregistrés
 
-## 1. Réorganisation des dossiers
+**Onglet Historique** : corrections approuvées/brouillon.
 
-L'arbo actuelle (`src/mp/components/*` à plat, 19 fichiers mélangés) est ingérable. Nouvelle structure orientée features :
+## Ce qui manque
 
-```
-src/
-├── routes/                    ← TanStack file-based (inchangé)
-│   ├── __root.tsx             ← ThemeProvider + QueryClientProvider
-│   ├── index.tsx              ← redirige selon session
-│   ├── login.tsx              ← route dédiée
-│   └── _authenticated/        ← layout sidebar protégé
-│       ├── route.tsx          ← garde + AppShell
-│       ├── chat.tsx
-│       ├── history.tsx
-│       ├── dashboard.tsx
-│       ├── kb.tsx
-│       ├── users.tsx
-│       ├── prompts.tsx
-│       ├── audit.tsx
-│       └── embed.tsx
-├── features/                  ← logique métier par domaine
-│   ├── chat/                  ← ChatShell, MessageBubble, VoiceInput, Feedback, Sources
-│   ├── auth/                  ← LoginPage, FirstVisitManagerSelection
-│   ├── kb/                    ← KnowledgeBaseAdmin, UploadPanel
-│   ├── admin/                 ← Users, Prompts, Audit, Dashboard, Embed
-│   └── history/               ← ManagerAdminHistory
-├── components/
-│   ├── ui/                    ← shadcn (inchangé)
-│   ├── layout/                ← AppShell, AppSidebar, AppHeader, ThemeToggle
-│   └── shared/                ← DataTable, EmptyState, SourceViewer
-├── lib/
-│   ├── api/                   ← ApiClient + mocks (depuis src/mp/api.ts)
-│   ├── auth/                  ← session, hooks useSession/useRole
-│   └── utils.ts
-├── types/                     ← shared.ts, types.ts consolidés
-└── styles.css                 ← design tokens v2
-```
+### 1. Paramètres d'inférence (nouveau bloc dans l'onglet Prompt système OU nouvel onglet "Modèle & inférence")
+- `temperature` (slider 0–2)
+- `topP` (slider 0–1)
+- `maxOutputTokens` (number)
+- `presencePenalty`, `frequencyPenalty`
+- `seed` (reproductibilité)
+- `stopSequences` (tags)
+- `streaming` (switch)
+- `responseFormat` : text / json / structured
+- `timeoutMs`
+- Modèle par défaut + **modèle fallback** + condition de bascule (timeout / 429 / 402)
 
-Le dossier `src/mp/` disparaît, tout est migré. `_backend-reference/` reste intact.
+### 2. RAG & connaissance (nouveau bloc "Récupération & sources")
+- `topK` chunks (1–20)
+- `minRelevanceScore` (0–1)
+- `rerankerEnabled` + modèle de reranker
+- `embeddingModel` (sélection)
+- `contextWindowTokens` (max tokens de contexte injecté)
+- `maxHistoryTurns` (mémoire conversationnelle)
+- Toggle "fallback web search si KB vide"
 
-## 2. Design system 2026
+### 3. Garde-fous & sécurité (nouveau bloc "Garde-fous")
+- `forbiddenTopics` (tags)
+- `piiRedaction` (switch + niveau strict/standard)
+- `safetyThreshold` (low/medium/high)
+- `refusalTemplate` (textarea — message standard de refus)
+- Toggle "loguer requêtes utilisateur en clair" (RGPD)
 
-**Tokens** (`src/styles.css`, OKLCH) :
-- Surface : blancs cassés (`#fafbfc`, `#f6f8fa`), bordures `#e8ecf1`, texte `oklch(0.15 0.02 250)`
-- Accent unique : bleu `#3b82f6` + glow
-- Dark mode : navy `#0a0e1a` / panels `#141a2e` / accent identique
-- Rayons : `--radius: 0.75rem` (12px, plus moderne que 6px actuel)
-- Ombres douces multi-niveaux (`shadow-sm` → `shadow-2xl`)
-- Espacements 4/8/12/16/24/32/48 strict
+### 4. Variables & few-shot (nouveau bloc dans Prompt)
+- Liste de **variables disponibles** (`{{user.name}}`, `{{user.role}}`, `{{date}}`, `{{kb_context}}`) avec aperçu
+- **Few-shot examples** : tableau (question → réponse) injectés dans le prompt compilé
 
-**Typographie** :
-- Sora (300/500/600/700) pour `h1`–`h3` + titres sidebar
-- Manrope (400/500/600) pour body, UI, tableaux
-- Tailwind `font-display` / `font-sans` mappés
+### 5. Gouvernance & cycle de vie
+- `changelog` / notes par version
+- `effectiveAt` (date de mise en production planifiée)
+- **Ciblage** : prompt actif par rôle (consultant / manager) ou par département
+- A/B testing : `canaryPercent` (0–100 %) entre 2 versions
+- Workflow d'approbation : `status` (DRAFT / REVIEW / APPROVED / ACTIVE) + approbateur requis
 
-**Motion** : Framer Motion (déjà dispo), transitions 150–250ms, easings physiques, blur-fade sur changements de route, message stream avec apparition lettre par lettre douce.
+### 6. Budget & quotas (nouveau bloc dans Providers)
+- `dailyTokenBudget`, `monthlyCostCap` (€)
+- `requestsPerMinute` par utilisateur
+- Alerte par email si dépassement X %
+- Modèles autorisés par rôle (matrice rôle × modèle)
 
-## 3. Composants layout (refonte)
+### 7. Améliorations Providers
+- Champ **modèle** : sélecteur avec catalogue prérempli (au lieu de texte libre) + version
+- `baseUrl` custom (pour Azure/proxy on-prem)
+- Toggle "actif/inactif", `priority` (ordre de fallback)
+- Test de connexion (bouton "Tester la clé") avec retour latence/statut
 
-- **AppShell** (`components/layout/AppShell.tsx`) : nouveau shell basé sur le **shadcn sidebar** (collapsible icon, mobile sheet auto, persistance cookie) au lieu de la sidebar maison actuelle qui casse en mobile.
-- **AppSidebar** : navigation filtrée par rôle, badge utilisateur, indicateur état (online), footer avec ThemeToggle + Logout.
-- **AppHeader** : breadcrumbs dynamiques, command palette (⌘K via shadcn `command`), avatar menu, toggle dark/light.
-- **ThemeProvider** : `next-themes`-like maison (class strategy, persisté en localStorage, SSR-safe).
-- **Responsive** : sidebar → Sheet en <768px, header sticky, contenu scrollable propre (résout les bugs actuels de scroll mobile).
+## Plan d'implémentation
 
-## 4. Refonte écran par écran
+### Étape 1 — Étendre les types et le mock
+- `src/mp/shared.ts` : enrichir `PromptVersion.configJson` avec les nouveaux champs (inférence, RAG, garde-fous, ciblage, variables, fewShot, changelog, effectiveAt, canaryPercent, status).
+- `src/mp/shared.ts` : enrichir `AiProviderConfig` avec `baseUrl`, `priority`, `active`, `dailyTokenBudget`, `monthlyCostCap`.
+- `src/mp/mocks.ts` : adapter les endpoints existants pour persister ces nouveaux champs + ajouter `POST /superadmin/providers/:id/test`.
 
-### Chat (priorité 1, cœur de l'app)
-- Centrage 720px, messages full-width avec gutters, avatars 32px
-- Bulles sans bordure marquée, juste fond `bg-muted/50`, accent uniquement sur user
-- Markdown rendering propre (code blocks avec syntax highlight `shiki`, tables, listes)
-- Source citations en chips cliquables sous chaque réponse → ouvre `SourceViewer` en `Sheet`
-- Input en bas, sticky, auto-grow, raccourcis `⌘↵`, drag-drop fichiers, bouton micro animé
-- État vide soigné (suggestions de prompts par rôle)
-- Stream avec curseur clignotant + bouton Stop
+### Étape 2 — Refonte de l'onglet "Prompt système"
+Découper `PromptEditor` en sous-sections accordéon ou tabs internes :
+1. **Identité & instruction** (existant)
+2. **Politiques de réponse** (existant)
+3. **Variables & few-shot** (nouveau)
+4. **Garde-fous** (nouveau)
+5. **Ciblage & déploiement** (nouveau : rôle, département, canaryPercent, effectiveAt, changelog)
 
-### Login
-- Split-screen : visuel à gauche (gradient subtle + logo MP grand), formulaire à droite
-- Champ email + password, comptes démo affichés en cartes cliquables (auto-fill)
-- Micro-anim entrée
+Mettre à jour `buildPromptContent()` pour injecter les variables, few-shots et garde-fous dans l'aperçu compilé.
 
-### Dashboard (Manager/Admin)
-- KPI cards en bento-grid (4 cards + 1 grande)
-- Charts via `recharts` (déjà installé) avec thème custom
-- Filtres en haut (période, dépt) propres
+### Étape 3 — Nouvel onglet "Inférence & RAG"
+Nouvelle section parallèle aux 3 onglets actuels avec :
+- Bloc Inférence (temperature/topP/maxTokens/seed/stop/streaming/responseFormat/timeout/fallback)
+- Bloc RAG (topK/minScore/reranker/embeddingModel/contextWindow/historyTurns)
 
-### Knowledge Base Admin
-- Toolbar : upload zone drag-drop + recherche + filtres status
-- Table redesignée avec `DataTable` shadcn (tri, sélection multiple, actions bulk)
-- Drawer détail document à droite
+### Étape 4 — Refonte de l'onglet "Providers & secrets"
+- Catalogue de modèles prérempli par provider (sélecteur en cascade)
+- Champs supplémentaires : baseUrl, priority, active, budgets
+- Bouton "Tester la clé" → toast latence + statut
+- Matrice rôles × modèles autorisés (sous-bloc)
 
-### Users / Prompts / Audit / Embed
-- Pattern admin commun : header + filtres + DataTable + side panel détail
-- Audit avec timeline visuelle + filtres date/action/acteur
+### Étape 5 — Vérification
+- Re-render des 3+1 onglets sans crash
+- L'aperçu de prompt généré reflète les nouveaux blocs
+- La sauvegarde envoie un `configJson` enrichi et l'historique l'affiche
 
-### Historique Q/R
-- Liste paginée, recherche full-text, expand inline pour voir Q+R complète
+## Points à confirmer avec toi
 
-## 5. Couche fonctionnelle (corrections)
-
-L'utilisateur dit "rien ne fonctionne". Probables causes vues dans le code actuel :
-- Sidebar maison cassée en responsive → remplacée par shadcn
-- Hydration issues localStorage → déjà patchées, on garde le pattern
-- `ApiClient` recréé à chaque render (`useMemo` sur `session` mutable) → stabiliser via context React
-- Pas de gestion d'erreur réseau visible → ajout `Sonner` toasts globaux
-- Pas de loading states → skeletons partout
-
-**Création `AuthContext` + `useAuth()` hook** pour centraliser session, éviter prop-drilling de `session`/`api` dans chaque composant.
-
-## 6. Plan d'exécution (ordre)
-
-1. **Fondations** : `styles.css` v2 (tokens, fonts via Google Fonts), `ThemeProvider`, install shadcn `sidebar` + `command` + `sonner` + `sheet`
-2. **Layout** : `AppShell` + `AppSidebar` + `AppHeader` + `ThemeToggle` + routes `_authenticated/`
-3. **Réorg dossiers** : déplacement `src/mp/components/*` → `src/features/*` + `src/components/layout/*` (en ajustant tous les imports)
-4. **AuthContext** + refonte `LoginPage` (route dédiée)
-5. **Chat redesign** (écran principal, le plus visible)
-6. **Admin screens** (KB, Users, Dashboard, Prompts, Audit, Embed, History)
-7. **Responsive QA** : mobile 375px, tablet 768px, desktop 1440px
-8. **Dark mode QA** : chaque écran vérifié dans les deux modes
-
-## Détails techniques
-
-- `_backend-reference/` reste intact, aucun fichier back touché
-- Mode mocks (`VITE_USE_MOCKS=true`) conservé, contrats API inchangés → quand vous brancherez AWS rien à refaire côté front
-- Tous les imports refactorés vers `@/features/*`, `@/components/*`, `@/lib/*`
-- Aucun composant shadcn existant supprimé
-- Suppression de `src/mp/` après migration complète (commit séparé pour clarté)
-
-## Ce qui n'est PAS dans ce plan (à valider plus tard)
-
-- Animations hero/marketing (pas de landing publique ici)
-- i18n complet (les libellés FR/EN restent en dur dans les composants pour l'instant)
-- Tests unitaires (à ajouter ensuite)
-- Storybook
-
-Durée estimée : c'est un gros chantier qui sera fait en **plusieurs allers-retours**. Je commence par les étapes 1→4 (fondations + layout + auth + réorg), puis on valide visuellement avant d'attaquer le Chat et les écrans admin.
+1. **Tu veux ajouter tous ces blocs**, ou tu préfères un sous-ensemble prioritaire (ex. seulement inférence + RAG + garde-fous, qui sont les plus critiques pour la prod) ?
+2. Pour le **catalogue de modèles**, tu veux que je liste les modèles Lovable AI (`google/gemini-3-flash-preview`, `openai/gpt-5`, etc.) en plus de Mistral/OpenAI custom ?
+3. Le **ciblage par rôle/département** et l'**A/B canary** sont des fonctionnalités lourdes — à inclure dès maintenant ou à reporter ?
