@@ -279,9 +279,21 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
                           </Badge>
                           <Badge variant="outline" className="font-mono text-[10px]">{lastAnswer.response.model}</Badge>
                           <span className="text-xs text-muted-foreground">{lastAnswer.response.latencyMs}ms</span>
+                          {lastAnswer.cache?.hit && (
+                            <Badge
+                              variant="outline"
+                              className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              title={`DynamoDB cache · clé ${lastAnswer.cache.key.slice(0, 8)}…`}
+                            >
+                              ⚡ Cache hit · {lastAnswer.cache.ageSeconds < 60
+                                ? `${lastAnswer.cache.ageSeconds}s`
+                                : `${Math.floor(lastAnswer.cache.ageSeconds / 60)}min`}
+                            </Badge>
+                          )}
                           {lastAnswer.response.escalationTriggered && (
                             <Badge variant="outline" className="border-warning/40 bg-warning/10 text-warning">escalade</Badge>
                           )}
+
                         </div>
                         {lastAnswer.appliedFilters &&
                           (lastAnswer.appliedFilters.industryTags.length > 0 ||

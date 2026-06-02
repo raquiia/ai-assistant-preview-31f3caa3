@@ -28,7 +28,10 @@ export interface ChatAnswerPayload {
   sources: SourceCitation[];
   escalationMessage?: string;
   appliedFilters?: { industryTags: string[]; pmDomainTags: string[] };
+  /** Wave 6.E — LLM response cache (DynamoDB). */
+  cache?: { hit: boolean; key: string; ageSeconds: number };
 }
+
 
 export interface HistoryRow {
   responseId: string;
