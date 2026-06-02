@@ -71,6 +71,17 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Auto-refresh while any document is still extracting via Textract/Transcribe.
+  useEffect(() => {
+    const hasProcessing = documents.some((d) => d.status === "PROCESSING");
+    if (!hasProcessing) return;
+    const id = setInterval(() => {
+      refresh().catch(() => undefined);
+    }, 10_000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documents]);
+
   async function ingestText() {
     await api.post("/admin/kb/upload", {
       title: "Note PMO locale.md",
