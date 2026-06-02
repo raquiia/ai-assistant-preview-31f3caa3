@@ -5,6 +5,9 @@ import type { ApiClient } from "../api";
 import { AdminLayout } from "./AdminLayout";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
 
 interface SystemCardPayload {
   systemCard: {
@@ -21,39 +24,52 @@ interface SystemCardPayload {
 export function AuditCenter({ api }: { api: ApiClient }) {
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [card, setCard] = useState<SystemCardPayload["systemCard"] | null>(null);
-  const [exportStatus, setExportStatus] = useState("");
 
   useEffect(() => {
-    api.get<{ events: AuditEvent[] }>("/superadmin/audit/events").then((payload) => setEvents(payload.events)).catch(() => setEvents([]));
-    api.get<SystemCardPayload>("/superadmin/compliance/system-card").then((payload) => setCard(payload.systemCard)).catch(() => setCard(null));
+    api
+      .get<{ events: AuditEvent[] }>("/superadmin/audit/events")
+      .then((payload) => setEvents(payload.events))
+      .catch(() => setEvents([]));
+    api
+      .get<SystemCardPayload>("/superadmin/compliance/system-card")
+      .then((payload) => setCard(payload.systemCard))
+      .catch(() => setCard(null));
   }, [api]);
 
   async function exportCompliance() {
     const payload = await api.post<{ exportedAt: string }>("/superadmin/compliance/export", {});
-    setExportStatus(`Export genere le ${new Date(payload.exportedAt).toLocaleString()}`);
+    toast.success(`Export généré le ${new Date(payload.exportedAt).toLocaleString()}`);
   }
 
   return (
     <AdminLayout
-      title="Audit, conformité et traçabilité"
+      title="Audit, conformité & traçabilité"
+      description="Suivez les actions sensibles, exportez les preuves et consultez la system card."
       actions={
-        <button className="flex h-10 items-center gap-2 rounded-mp bg-mp-blue px-3 text-sm font-semibold text-white shadow-sm" onClick={() => void exportCompliance()}>
-          <Download size={16} />
+        <Button onClick={() => void exportCompliance()} className="gap-2">
+          <Download size={15} />
           Export JSON
-        </button>
+        </Button>
       }
     >
-      <div className="space-y-4">
-        <section className="rounded-mp border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 flex items-center gap-2">
-            <ShieldCheck size={18} className="text-mp-blue" />
-            <p className="text-sm font-semibold text-slate-950">System card</p>
+      <div className="space-y-6">
+        <section className="rounded-2xl border border-border/70 bg-card p-6 shadow-sm">
+          <div className="mb-4 flex items-center gap-3">
+            <div className="grid h-9 w-9 place-items-center rounded-lg bg-primary/10 text-primary">
+              <ShieldCheck size={16} />
+            </div>
+            <div>
+              <p className="font-display text-base font-semibold text-foreground">System card</p>
+              <p className="text-xs text-muted-foreground">
+                Cartographie de l'usage IA et des contrôles en place.
+              </p>
+            </div>
           </div>
           {card ? (
-            <div className="grid gap-3 text-sm md:grid-cols-3">
-              <InfoBlock label="Finalite" value={card.purpose} />
-              <InfoBlock label="Donnees" value={card.dataProcessed.join(", ")} />
-              <InfoBlock label="Controles" value={card.controls.join(", ")} />
+            <div className="grid gap-3 md:grid-cols-3">
+              <InfoBlock label="Finalité" value={card.purpose} />
+              <InfoBlock label="Données" value={card.dataProcessed.join(", ")} />
+              <InfoBlock label="Contrôles" value={card.controls.join(", ")} />
             </div>
           ) : (
             <EmptyState
@@ -64,17 +80,45 @@ export function AuditCenter({ api }: { api: ApiClient }) {
           )}
         </section>
 
-        {exportStatus && <p className="rounded-mp border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm text-slate-700">{exportStatus}</p>}
-
         {events.length ? (
           <DataTable
             rows={events}
             columns={[
-              { key: "createdAt", header: "Date", render: (row) => new Date(row.createdAt).toLocaleString() },
-              { key: "action", header: "Action" },
-              { key: "entityType", header: "Entite" },
-              { key: "actorId", header: "Acteur" },
-              { key: "metadataJson", header: "Metadata", render: (row) => <code className="text-xs">{JSON.stringify(row.metadataJson)}</code> }
+              {
+                key: "createdAt",
+                header: "Date",
+                render: (row) => (
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {new Date(row.createdAt).toLocaleString()}
+                  </span>
+                ),
+              },
+              {
+                key: "action",
+                header: "Action",
+                render: (row) => (
+                  <Badge variant="secondary" className="rounded-full font-mono text-[11px]">
+                    {row.action}
+                  </Badge>
+                ),
+              },
+              { key: "entityType", header: "Entité" },
+              {
+                key: "actorId",
+                header: "Acteur",
+                render: (row) => (
+                  <span className="font-mono text-xs text-muted-foreground">{row.actorId}</span>
+                ),
+              },
+              {
+                key: "metadataJson",
+                header: "Metadata",
+                render: (row) => (
+                  <code className="block max-w-xs truncate font-mono text-[11px] text-muted-foreground">
+                    {JSON.stringify(row.metadataJson)}
+                  </code>
+                ),
+              },
             ]}
           />
         ) : (
@@ -91,9 +135,11 @@ export function AuditCenter({ api }: { api: ApiClient }) {
 
 function InfoBlock({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-mp bg-slate-50 p-3">
-      <p className="mb-1 text-xs font-semibold uppercase tracking-normal text-slate-500">{label}</p>
-      <p className="mp-text-wrap leading-6 text-slate-700">{value}</p>
+    <div className="rounded-xl border border-border/50 bg-muted/30 p-4">
+      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </p>
+      <p className="mp-text-wrap text-sm leading-relaxed text-foreground/80">{value}</p>
     </div>
   );
 }
