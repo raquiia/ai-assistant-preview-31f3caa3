@@ -1,50 +1,58 @@
-# Enrichir le Dashboard Super Admin avec la satisfaction
+# Refonte UX de l'onglet Historique
 
 ## Constat
 
-Le dashboard actuel (`src/mp/components/SuperAdminDashboard.tsx`) affiche 4 KPI : Questions, Utilisateurs actifs, Fallback, Coût estimé — plus latence p50/p95, fallback, escalade et un journal d'activité.
+L'onglet Historique souffre des mêmes maux que la KB avant refonte :
 
-Il manque les indicateurs liés au **feedback utilisateur**, alors que le système collecte déjà :
-- des votes pouce haut / pouce bas (`UP` / `DOWN`)
-- des notes 1 à 5 étoiles (`ONE`…`FIVE`)
-- des commentaires libres
+- **Scroll horizontal** sur la `DataTable` 6 colonnes (Date, Consultant, Question, Modèle, Confiance, Escalade) combinée à un panneau latéral de 440 px → la question (colonne clé) est tronquée et illisible sur viewport standard.
+- **Filtres pauvres** : un seul filtre "Avec fallback", aucun filtre par tonalité de feedback (positif/négatif/neutre), par escalade, ni par période.
+- **Pas d'aperçu** : impossible de voir l'extrait de réponse, le sentiment du feedback consultant, ni le nombre de retours sans cliquer ligne par ligne.
+- **Panneau latéral fixe** : occupe 440 px même quand rien n'est sélectionné, ce qui réduit encore la zone utile.
 
-Aucun de ces signaux n'est aujourd'hui agrégé dans le dashboard.
+## Ce que je propose
 
-## Ce que je propose d'ajouter
+### 1. Liste en cartes denses (remplace la `DataTable`)
 
-### 1. Nouveaux KPI exposés par le payload dashboard
+Chaque échange devient une **HistoryCard** verticale empilée, sans scroll latéral :
 
-Étendre `DashboardPayload.kpis` (`src/mp/types.ts`) avec :
-- `satisfactionRate` (% de feedbacks positifs : `UP`, `FOUR`, `FIVE`)
-- `feedbackCount` (volume total de feedbacks)
-- `averageStars` (moyenne des notes 1–5, ignore UP/DOWN)
-- `positiveCount`, `neutralCount`, `negativeCount` (répartition)
+- **En-tête** : avatar + nom consultant, date relative, badges statut (Escalade / Fallback / OK).
+- **Question** en titre lisible (line-clamp 2).
+- **Extrait de réponse** sur 2 lignes en `text-muted-foreground`.
+- **Pied** : modèle, latence, confiance (mini barre), et **pastille feedback** (👍 vert / 👎 rouge / ★ N/5 / "—" si aucun retour) + indicateur "commentaire admin" si présent.
+- Carte entière cliquable → ouvre le détail.
+- Carte sélectionnée mise en évidence (ring primary).
 
-### 2. Mock backend cohérent
+### 2. Toolbar enrichie
 
-Mettre à jour `src/mp/mocks.ts` (`GET /admin/dashboard`) pour calculer ces valeurs à partir de `historyFeedback` déjà présent dans les mocks (UP, DOWN, THREE…), afin que les chiffres soient cohérents avec ce que le manager voit dans l'historique.
+Au-dessus de la liste, une barre cohérente avec la KB :
 
-### 3. UI dashboard
+- Recherche plein texte (déjà présente, conservée).
+- `Select` **Tonalité du feedback** : Tous / Positifs / Négatifs / Neutres / Sans feedback.
+- `Select` **Statut technique** : Tous / Escalade / Fallback / Normal.
+- `Select` **Période** : 24 h / 7 j / 30 j / Tout.
+- Compteur `{visible} / {total}` à droite.
 
-Dans `SuperAdminDashboard.tsx` :
+Filtrage multi-critères via `useMemo`, comme dans `KnowledgeBaseAdmin`.
 
-- **Carte KPI "Satisfaction"** en première position (ton `success`), valeur `XX %`, hint = nombre de feedbacks (`N retours`).
-- Réorganiser la grille de cartes en 5 KPI clés (responsive `md:grid-cols-2 xl:grid-cols-4` → on garde 4 cartes principales : Satisfaction, Questions, Fallback, Coût ; Utilisateurs actifs et latence p50 passent dans une seconde ligne secondaire).
-- Nouvelle **section "Qualité perçue"** à côté de "Latence & qualité" :
-  - barre empilée Positif / Neutre / Négatif
-  - moyenne d'étoiles affichée en grand (`★ 4,2 / 5`)
-  - compteur de feedbacks totaux
-- Mettre à jour `hasOperationalData` pour qu'il prenne aussi `feedbackCount > 0` en compte.
+### 3. Pagination progressive
 
-### 4. État vide
+`PAGE_SIZE = 12`, bouton "Afficher plus" identique à la KB, reset à chaque changement de filtre.
 
-Si `feedbackCount === 0`, afficher dans la section Qualité perçue un `EmptyState` discret ("Aucun retour utilisateur pour le moment"), sans inventer de chiffre — conforme à la règle "zéro chiffre inventé".
+### 4. Layout responsive du panneau de détail
+
+- **Aucune sélection** → la liste prend toute la largeur (pas de colonne vide de 440 px).
+- **Sélection active** → grille `xl:grid-cols-[minmax(0,1fr)_460px]`.
+- Sur < `xl` (tablette / portrait), le détail passe sous la liste plutôt qu'à côté.
+- Bouton "Fermer" dans l'en-tête du panneau pour revenir à la pleine largeur.
+
+### 5. Petites améliorations du panneau de détail
+
+- Date relative ("il y a 2 h") en plus de la date absolue.
+- Bloc Q/R avec libellés visuels "Question" / "Réponse IA" pour la hiérarchie.
+- Les sections existantes (Feedback consultant, Optimisation IA, Sources) restent telles quelles, juste re-titrées avec des icônes cohérentes.
 
 ## Fichiers modifiés
 
-- `src/mp/types.ts` — extension de `DashboardPayload.kpis`
-- `src/mp/mocks.ts` — calcul des nouveaux KPI à partir de `historyFeedback`
-- `src/mp/components/SuperAdminDashboard.tsx` — nouvelle carte Satisfaction + section Qualité perçue
+- `src/mp/components/ManagerAdminHistory.tsx` — seul fichier touché. Pas de changement du contrat API ni des mocks.
 
-Aucun changement de routing, d'auth ou de schéma backend réel — uniquement la couche présentation et le contrat de payload côté front/mock.
+UX uniquement : aucune modification de logique métier, d'auth ou de schéma.
