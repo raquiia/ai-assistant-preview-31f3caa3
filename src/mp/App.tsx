@@ -52,12 +52,18 @@ function readStoredSession(): Session | null {
 }
 
 export function MpApp() {
-  const [session, setSession] = useState<Session | null>(readStoredSession);
-  const [navCollapsed, setNavCollapsed] = useState(() =>
-    typeof window !== "undefined" && window.localStorage.getItem(NAV_KEY) === "true",
-  );
+  const [hydrated, setHydrated] = useState(false);
+  const [session, setSession] = useState<Session | null>(null);
+  const [navCollapsed, setNavCollapsed] = useState(false);
   const [view, setView] = useState<ViewKey>("chat");
   const api = useMemo(() => new ApiClient(() => session), [session]);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(SESSION_KEY);
+    if (stored) setSession(JSON.parse(stored) as Session);
+    setNavCollapsed(window.localStorage.getItem(NAV_KEY) === "true");
+    setHydrated(true);
+  }, []);
 
   function handleSession(next: Session | null) {
     setSession(next);
