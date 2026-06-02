@@ -441,6 +441,10 @@ export function AuditCenter({ api }: { api: ApiClient }) {
   );
 }
 
+function formatList(value?: string[]) {
+  return Array.isArray(value) && value.length ? value.join(", ") : "—";
+}
+
 function InfoBlock({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-border/50 bg-muted/30 p-4">

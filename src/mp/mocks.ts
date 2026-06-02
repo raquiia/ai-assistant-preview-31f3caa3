@@ -775,8 +775,12 @@ export function handleMock<T>(
       },
     } as T;
   }
-  if (method === "GET" && path === "/admin/compliance/export") {
-    return { url: "data:text/plain;base64,TUlHU08tUENVQkVE", expiresIn: 3600 } as T;
+  if ((method === "GET" || method === "POST") && path === "/admin/compliance/export") {
+    return {
+      exportedAt: now(),
+      url: "data:text/plain;base64,TUlHU08tUENVQkVE",
+      expiresIn: 3600,
+    } as T;
   }
   if (method === "GET" && path === "/admin/corrections") {
     return { corrections: [] } as T;
