@@ -1,105 +1,87 @@
-## Audit de l'existant
+## Contexte (existant déjà en place)
 
-**Onglet Prompt système** (`PromptEditor`) — déjà présent :
-- Nom, instruction de base, ton (4 valeurs)
-- Toggle Web search
-- 6 politiques textuelles : sources, code de conduite, escalade, citations, langue, structure de réponse
-- Versionning + rollback
+- **Backend de référence** (`_backend-reference/`)
+  - `ModelRouter.answer()` : Mistral en primaire → fallback OpenAI déclenché si `qualityGate` échoue ou si `forceFallback=true`. ✅
+  - `HybridRetriever` (`packages/rag`) renvoie chunks + score + champs `chunkId/documentId/page/section/excerpt`. ✅
+  - RBAC : `canUploadKnowledge(actor)` autorise **MANAGER ET SUPER_ADMIN** ⚠️ (à restreindre).
+  - Vector store : `MockVectorProvider` actif + stub `OpenSearchVectorProvider` non câblé.
+- **Frontend** (`src/mp/`)
+  - `ChatShell` : confiance `/100`, badge "fallback" minuscule, bouton "Retenter avec fallback".
+  - `SourceCards` : titre + score `X/100` (pas de barre de pertinence, pas de page/extrait visibles).
+  - `KnowledgeBaseAdmin` : publish/reindex gated `SUPER_ADMIN` ✅, mais `UploadPanel` rendu **sans garde** ⚠️.
+  - Sidebar : entrée "Knowledge Base" visible aux MANAGER/AUDITOR (lecture seule cohérente, mais l'upload doit disparaître pour eux).
 
-**Onglet Providers & secrets** (`ApiKeyManager`) — minimal :
-- provider (mistral / openai / search), model (texte libre), apiKey
-- Liste des providers enregistrés
+---
 
-**Onglet Historique** : corrections approuvées/brouillon.
+## Plan
 
-## Ce qui manque
+### 1. Audit — synthèse à livrer dans la réponse finale (lecture seule)
 
-### 1. Paramètres d'inférence (nouveau bloc dans l'onglet Prompt système OU nouvel onglet "Modèle & inférence")
-- `temperature` (slider 0–2)
-- `topP` (slider 0–1)
-- `maxOutputTokens` (number)
-- `presencePenalty`, `frequencyPenalty`
-- `seed` (reproductibilité)
-- `stopSequences` (tags)
-- `streaming` (switch)
-- `responseFormat` : text / json / structured
-- `timeoutMs`
-- Modèle par défaut + **modèle fallback** + condition de bascule (timeout / 429 / 402)
+Tableau écart par écart (côté chat + KB + RBAC), produit en chat sans modifier le code :
+- Fallback OpenAI : déclencheurs réels vs déclencheurs UI.
+- Citations : champs disponibles côté back vs ce qu'on affiche.
+- Permissions upload front / back.
+- État du vector store (mock vs OpenSearch).
 
-### 2. RAG & connaissance (nouveau bloc "Récupération & sources")
-- `topK` chunks (1–20)
-- `minRelevanceScore` (0–1)
-- `rerankerEnabled` + modèle de reranker
-- `embeddingModel` (sélection)
-- `contextWindowTokens` (max tokens de contexte injecté)
-- `maxHistoryTurns` (mémoire conversationnelle)
-- Toggle "fallback web search si KB vide"
+### 2. UX chat — afficher proprement la provenance de la réponse
 
-### 3. Garde-fous & sécurité (nouveau bloc "Garde-fous")
-- `forbiddenTopics` (tags)
-- `piiRedaction` (switch + niveau strict/standard)
-- `safetyThreshold` (low/medium/high)
-- `refusalTemplate` (textarea — message standard de refus)
-- Toggle "loguer requêtes utilisateur en clair" (RGPD)
+Fichiers : `src/mp/components/ChatShell.tsx`, `src/mp/components/SourceCards.tsx`.
 
-### 4. Variables & few-shot (nouveau bloc dans Prompt)
-- Liste de **variables disponibles** (`{{user.name}}`, `{{user.role}}`, `{{date}}`, `{{kb_context}}`) avec aperçu
-- **Few-shot examples** : tableau (question → réponse) injectés dans le prompt compilé
+a. **Bandeau "réponse" enrichi** sous chaque réponse IA :
+   - Provider réel : pastille `Mistral` (primaire) ou `OpenAI · fallback` (avec icône + couleur sémantique `accent` / `warning`).
+   - Modèle utilisé (`response.model`).
+   - Confiance : barre de progression colorée + libellé (`≥80` vert, `60–79` ambre, `<60` rouge).
+   - Latence (`latencyMs`) et badge `escalation` si `escalationTriggered=true`.
 
-### 5. Gouvernance & cycle de vie
-- `changelog` / notes par version
-- `effectiveAt` (date de mise en production planifiée)
-- **Ciblage** : prompt actif par rôle (consultant / manager) ou par département
-- A/B testing : `canaryPercent` (0–100 %) entre 2 versions
-- Workflow d'approbation : `status` (DRAFT / REVIEW / APPROVED / ACTIVE) + approbateur requis
+b. **Refonte `SourceCards`** :
+   - Carte source avec titre du document + section/page si dispo.
+   - Barre de pertinence `score/100` (couleur sémantique) + valeur en `%`.
+   - Extrait (2 lignes max, `line-clamp-2`) cliquable → ouvre `SourceViewer` (déjà existant).
+   - Tri décroissant par score, top 5 dépliable.
 
-### 6. Budget & quotas (nouveau bloc dans Providers)
-- `dailyTokenBudget`, `monthlyCostCap` (€)
-- `requestsPerMinute` par utilisateur
-- Alerte par email si dépassement X %
-- Modèles autorisés par rôle (matrice rôle × modèle)
+c. **Action fallback explicite** :
+   - Remplacer le bouton "retry-fallback" cryptique par : *"Régénérer avec OpenAI"* visible uniquement si la réponse courante a `fallbackUsed=false`.
+   - Toast clair en cas d'échec.
 
-### 7. Améliorations Providers
-- Champ **modèle** : sélecteur avec catalogue prérempli (au lieu de texte libre) + version
-- `baseUrl` custom (pour Azure/proxy on-prem)
-- Toggle "actif/inactif", `priority` (ordre de fallback)
-- Test de connexion (bouton "Tester la clé") avec retour latence/statut
+d. **Cas "aucune source"** : conserver l'`EmptyState` mais ajouter une mention *"La base de connaissance n'a renvoyé aucun extrait ≥ seuil de pertinence (`minRelevanceScore`)"* pour aider le SUPER_ADMIN à ajuster le seuil.
 
-## Plan d'implémentation
+### 3. Verrouillage des permissions d'upload (SUPER_ADMIN uniquement)
 
-### Étape 1 — Étendre les types et le mock
-- `src/mp/shared.ts` : enrichir `PromptVersion.configJson` avec les nouveaux champs (inférence, RAG, garde-fous, ciblage, variables, fewShot, changelog, effectiveAt, canaryPercent, status).
-- `src/mp/shared.ts` : enrichir `AiProviderConfig` avec `baseUrl`, `priority`, `active`, `dailyTokenBudget`, `monthlyCostCap`.
-- `src/mp/mocks.ts` : adapter les endpoints existants pour persister ces nouveaux champs + ajouter `POST /superadmin/providers/:id/test`.
+**Frontend**
+- `KnowledgeBaseAdmin.tsx` : conditionner le rendu de `<UploadPanel />` à `session.user.role === "SUPER_ADMIN"`. Pour les autres rôles : afficher une bannière *"Lecture seule — seul le Super Admin peut alimenter la base de connaissance."*
+- `UploadPanel.tsx` : double garde (le composant refuse de monter si rôle ≠ SUPER_ADMIN) + bouton désactivé.
+- `src/mp/mocks.ts` : `POST /kb/documents` et `/kb/documents/:id/reindex|publish|PATCH` → rejet 403 si `session.user.role !== "SUPER_ADMIN"`.
 
-### Étape 2 — Refonte de l'onglet "Prompt système"
-Découper `PromptEditor` en sous-sections accordéon ou tabs internes :
-1. **Identité & instruction** (existant)
-2. **Politiques de réponse** (existant)
-3. **Variables & few-shot** (nouveau)
-4. **Garde-fous** (nouveau)
-5. **Ciblage & déploiement** (nouveau : rôle, département, canaryPercent, effectiveAt, changelog)
+**Backend de référence**
+- `_backend-reference/packages/shared/src/rbac.ts` :
+  ```ts
+  export function canUploadKnowledge(actor: User): boolean {
+    return actor.role === "SUPER_ADMIN";
+  }
+  ```
+- Vérifier que `apps/api/src/app.ts` (`POST /admin/kb/upload`, `/reindex`, `/publish`) utilise bien ce garde — c'est déjà le cas, le simple changement de la fonction suffit.
+- Ajouter événement audit `KB_UPLOAD_DENIED` si appel par non-SUPER_ADMIN.
 
-Mettre à jour `buildPromptContent()` pour injecter les variables, few-shots et garde-fous dans l'aperçu compilé.
+### 4. Vector store cible : OpenSearch Serverless (documentation backend uniquement)
 
-### Étape 3 — Nouvel onglet "Inférence & RAG"
-Nouvelle section parallèle aux 3 onglets actuels avec :
-- Bloc Inférence (temperature/topP/maxTokens/seed/stop/streaming/responseFormat/timeout/fallback)
-- Bloc RAG (topK/minScore/reranker/embeddingModel/contextWindow/historyTurns)
+Ce plan ne touche pas l'app Lovable (pas d'AWS exécutable depuis le sandbox), mais aligne `_backend-reference/` :
+- `packages/rag/src/vectorProvider.ts` : compléter `OpenSearchVectorProvider` (déjà stub) pour utiliser AWS SigV4 + index `mp-document-chunks` (mapping `knn_vector`, dim 3072).
+- `infra/aws/main.tf` : ajout collection OpenSearch Serverless type `VECTORSEARCH`, policy data-access, IAM pour la Lambda/ECS d'ingestion.
+- `apps/worker/src/ingestionPipeline.ts` : appel embeddings (Mistral `mistral-embed` 1024 dim **ou** OpenAI `text-embedding-3-large` 3072 dim — au choix lors du build) + upsert vers OpenSearch.
+- `.env.example` : `OPENSEARCH_ENDPOINT`, `OPENSEARCH_INDEX`, `AWS_REGION`.
 
-### Étape 4 — Refonte de l'onglet "Providers & secrets"
-- Catalogue de modèles prérempli par provider (sélecteur en cascade)
-- Champs supplémentaires : baseUrl, priority, active, budgets
-- Bouton "Tester la clé" → toast latence + statut
-- Matrice rôles × modèles autorisés (sous-bloc)
+> Côté Lovable, on garde `MockVectorProvider` pour le mode démo (`VITE_USE_MOCKS=true`). Le switch se fait via env quand on bascule sur l'API Fastify réelle.
 
-### Étape 5 — Vérification
-- Re-render des 3+1 onglets sans crash
-- L'aperçu de prompt généré reflète les nouveaux blocs
-- La sauvegarde envoie un `configJson` enrichi et l'historique l'affiche
+---
 
-## Points à confirmer avec toi
+## Hors scope
 
-1. **Tu veux ajouter tous ces blocs**, ou tu préfères un sous-ensemble prioritaire (ex. seulement inférence + RAG + garde-fous, qui sont les plus critiques pour la prod) ?
-2. Pour le **catalogue de modèles**, tu veux que je liste les modèles Lovable AI (`google/gemini-3-flash-preview`, `openai/gpt-5`, etc.) en plus de Mistral/OpenAI custom ?
-3. Le **ciblage par rôle/département** et l'**A/B canary** sont des fonctionnalités lourdes — à inclure dès maintenant ou à reporter ?
+- Provisioning AWS effectif (Terraform apply) — reste manuel côté ops.
+- Pipeline d'ingestion temps réel — déjà couvert par `apps/worker`, non modifié ici.
+- Changements de modèle (Mistral large vs medium, GPT-5 vs GPT-5.5) — à régler via l'écran *Prompts & Modèles*.
+
+## Détails techniques rapides
+
+- Sémantique couleurs : créer si absent les tokens `--confidence-high|med|low` dans `src/styles.css` (oklch) pour ne pas hardcoder de Tailwind colors dans les cartes.
+- `SourceCards` reçoit déjà `score`, `excerpt`, `title`, `page`, `section` via `SourceCitation` (`src/mp/shared.ts:88`) — aucune extension de type nécessaire.
+- L'endpoint `/chat/responses/:id/retry-fallback` existe déjà dans `mocks.ts` et `app.ts`, on se contente de relabelliser le bouton.

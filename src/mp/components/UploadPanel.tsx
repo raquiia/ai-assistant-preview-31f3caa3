@@ -1,14 +1,25 @@
-import { FileUp, Loader2 } from "lucide-react";
+import { FileUp, Loader2, Lock } from "lucide-react";
 import { useState } from "react";
 import type { ApiClient } from "../api";
+import type { Session } from "../types";
 import { Button } from "@/components/ui/button";
 
-export function UploadPanel({ api, onUploaded }: { api: ApiClient; onUploaded?: () => void }) {
+export function UploadPanel({
+  api,
+  session,
+  onUploaded,
+}: {
+  api: ApiClient;
+  session: Session;
+  onUploaded?: () => void;
+}) {
   const [status, setStatus] = useState<string>("");
   const [busy, setBusy] = useState(false);
 
+  const canUpload = session.user.role === "SUPER_ADMIN";
+
   async function upload(file: File | null) {
-    if (!file) return;
+    if (!file || !canUpload) return;
     setBusy(true);
     setStatus("Upload en cours…");
     const form = new FormData();
@@ -24,6 +35,15 @@ export function UploadPanel({ api, onUploaded }: { api: ApiClient; onUploaded?: 
     }
   }
 
+  if (!canUpload) {
+    return (
+      <Button variant="outline" size="sm" className="gap-2" disabled title="Réservé au Super Admin">
+        <Lock size={15} />
+        <span>Upload (Super Admin)</span>
+      </Button>
+    );
+  }
+
   return (
     <Button asChild variant="outline" size="sm" className="gap-2">
       <label className="cursor-pointer">
@@ -32,6 +52,7 @@ export function UploadPanel({ api, onUploaded }: { api: ApiClient; onUploaded?: 
         <input
           className="hidden"
           type="file"
+          disabled={busy}
           onChange={(event) => upload(event.target.files?.[0] ?? null)}
         />
       </label>

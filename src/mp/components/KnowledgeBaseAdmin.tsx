@@ -88,7 +88,7 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
       description="Gérez la base documentaire, contrôlez les revues et la vectorisation des sources."
       actions={
         <div className="flex flex-wrap gap-2">
-          <UploadPanel api={api} onUploaded={() => void refresh()} />
+          <UploadPanel api={api} session={session} onUploaded={() => void refresh()} />
           <Button variant="outline" size="sm" className="gap-2" onClick={() => void refresh()}>
             <RefreshCcw size={15} />
             Recharger
@@ -98,26 +98,40 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
     >
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_440px]">
         <section className="min-w-0 space-y-5">
-          <div className="rounded-2xl border border-border/70 bg-card p-5 shadow-sm">
-            <div className="mb-3 flex items-center gap-2">
-              <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary">
-                <UploadCloud size={15} />
-              </div>
+          {session.user.role !== "SUPER_ADMIN" && (
+            <div className="flex items-start gap-3 rounded-2xl border border-warning/40 bg-warning/10 p-4 text-sm">
+              <ShieldCheck size={16} className="mt-0.5 shrink-0 text-warning" />
               <div>
-                <p className="text-sm font-semibold text-foreground">Upload texte rapide</p>
-                <p className="text-xs text-muted-foreground">Idéal pour un essai ou une note interne.</p>
+                <p className="font-medium text-foreground">Lecture seule</p>
+                <p className="text-xs text-muted-foreground">
+                  Seul le Super Admin peut alimenter la base de connaissance vectorisée (upload, publication, réindexation).
+                </p>
               </div>
             </div>
-            <Textarea
-              className="min-h-28 resize-none"
-              value={sampleText}
-              onChange={(event) => setSampleText(event.target.value)}
-            />
-            <Button size="sm" className="mt-3 gap-2" onClick={() => void ingestText()}>
-              <UploadCloud size={15} />
-              Envoyer en revue
-            </Button>
-          </div>
+          )}
+
+          {session.user.role === "SUPER_ADMIN" && (
+            <div className="rounded-2xl border border-border/70 bg-card p-5 shadow-sm">
+              <div className="mb-3 flex items-center gap-2">
+                <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary">
+                  <UploadCloud size={15} />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Upload texte rapide</p>
+                  <p className="text-xs text-muted-foreground">Idéal pour un essai ou une note interne.</p>
+                </div>
+              </div>
+              <Textarea
+                className="min-h-28 resize-none"
+                value={sampleText}
+                onChange={(event) => setSampleText(event.target.value)}
+              />
+              <Button size="sm" className="mt-3 gap-2" onClick={() => void ingestText()}>
+                <UploadCloud size={15} />
+                Envoyer en revue
+              </Button>
+            </div>
+          )}
 
           {documents.length ? (
             <DataTable
