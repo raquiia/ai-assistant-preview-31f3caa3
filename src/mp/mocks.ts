@@ -398,7 +398,7 @@ export function handleMock<T>(
       role: "CONSULTANT",
       managerId,
       language: payload.language ?? "fr",
-      status: "ACTIVE",
+      status: "PENDING_MANAGER",
       department: payload.department ?? manager.department ?? null,
       createdAt: now(),
       updatedAt: now(),
@@ -406,6 +406,68 @@ export function handleMock<T>(
     users.push(newUser);
     return { user: newUser, accessToken: `mock-token-${newUser.id}` } as T;
   }
+
+  // MANAGER APPROVALS — consultants en attente rattachés au manager courant
+  if (method === "GET" && path === "/managers/me/pending-consultants") {
+    const me = session?.user;
+    if (!me) return { consultants: [] } as T;
+    const list = users.filter(
+      (u) => u.role === "CONSULTANT" && u.status === "PENDING_MANAGER" && u.managerId === me.id,
+    );
+    return { consultants: list } as T;
+  }
+
+  let approve = match(path, "/managers/consultants/:id/approve");
+  if (method === "POST" && approve) {
+    const me = session?.user;
+    const target = users.find((u) => u.id === approve!.id);
+    if (!target) throw new Error("Consultant introuvable");
+    if (me && me.role === "MANAGER" && target.managerId !== me.id)
+      throw new Error("Ce consultant n'est pas rattaché à votre périmètre");
+    target.status = "ACTIVE";
+    target.updatedAt = now();
+    return { user: target } as T;
+  }
+
+  let reject = match(path, "/managers/consultants/:id/reject");
+  if (method === "POST" && reject) {
+    const me = session?.user;
+    const target = users.find((u) => u.id === reject!.id);
+    if (!target) throw new Error("Consultant introuvable");
+    if (me && me.role === "MANAGER" && target.managerId !== me.id)
+      throw new Error("Ce consultant n'est pas rattaché à votre périmètre");
+    target.status = "DISABLED";
+    target.updatedAt = now();
+    return { user: target } as T;
+  }
+
+  // Notifications minimales (compteur pour le badge sidebar)
+  if (method === "GET" && path === "/notifications/pending-count") {
+    const me = session?.user;
+    if (!me) return { count: 0 } as T;
+    if (me.role === "MANAGER") {
+      const c = users.filter(
+        (u) => u.role === "CONSULTANT" && u.status === "PENDING_MANAGER" && u.managerId === me.id,
+      ).length;
+      return { count: c } as T;
+    }
+    if (me.role === "SUPER_ADMIN") {
+      const c = users.filter((u) => u.role === "CONSULTANT" && u.status === "PENDING_MANAGER").length;
+      return { count: c } as T;
+    }
+    return { count: 0 } as T;
+  }
+
+  // GET courant pour rafraîchir la session côté front (statut, managerId)
+  if (method === "GET" && path === "/auth/me") {
+    const me = session?.user;
+    if (!me) throw new Error("Non authentifié");
+    const stored = users.find((u) => u.id === me.id) ?? me;
+    return { user: stored } as T;
+  }
+
+
+
 
 
 
