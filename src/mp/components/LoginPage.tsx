@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ApiClient } from "../api";
 import { useAuth } from "../auth";
+import { authProvider, AUTH_MODE } from "../auth/index";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,8 +49,7 @@ export function LoginPage() {
     event.preventDefault();
     setLoading(true);
     try {
-      const api = new ApiClient(() => null);
-      const session = await api.post<Session>("/auth/login", { email, password });
+      const session = await authProvider.signIn(email, password);
       setSession(session);
       toast.success("Connexion réussie", { description: `Bienvenue ${session.user.name}` });
     } catch (err) {
