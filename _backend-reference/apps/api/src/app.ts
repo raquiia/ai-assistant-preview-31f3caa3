@@ -156,6 +156,154 @@ export async function buildApp() {
     managers: repo.state.users.filter((user) => user.role === "MANAGER" && user.status === "ACTIVE")
   }));
 
+  // Self-registration: a consultant creates an account and selects a manager.
+  // The account is created in PENDING_MANAGER and waits for the manager to approve.
+  app.post("/auth/register", async (request, reply) => {
+    const body = request.body as {
+      email?: string;
+      password?: string;
+      name?: string;
+      managerId?: string;
+      department?: string | null;
+      language?: string;
+    };
+    if (!body.email || !body.password || !body.name || !body.managerId) {
+      return reply.code(400).send({ error: "email, password, name and managerId are required" });
+    }
+    if (body.password.length < 8) {
+      return reply.code(400).send({ error: "password must be at least 8 characters" });
+    }
+    if (repo.findUserByEmail(body.email)) {
+      return reply.code(409).send({ error: "email already in use" });
+    }
+    const manager = repo.state.users.find(
+      (user) => user.id === body.managerId && user.role === "MANAGER" && user.status === "ACTIVE"
+    );
+    if (!manager) return reply.code(404).send({ error: "Manager not found or inactive" });
+
+    const now = new Date().toISOString();
+    const user: User & { passwordHash?: string } = {
+      id: `usr-${crypto.randomUUID()}`,
+      email: body.email,
+      name: body.name,
+      role: "CONSULTANT",
+      managerId: manager.id,
+      language: body.language ?? "fr",
+      status: "PENDING_MANAGER",
+      department: body.department ?? manager.department ?? null,
+      createdAt: now,
+      updatedAt: now,
+      passwordHash: await hashPassword(body.password)
+    } as User & { passwordHash?: string };
+    repo.state.users.push(user);
+    repo.audit({
+      actorId: user.id,
+      action: "USER_REGISTERED",
+      entityType: "User",
+      entityId: user.id,
+      metadataJson: { managerId: manager.id, status: "PENDING_MANAGER" },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] ?? null
+    });
+    return {
+      user,
+      accessToken: signToken(user.id, "access", 60 * 60),
+      refreshToken: signToken(user.id, "refresh", 60 * 60 * 24 * 14)
+    };
+  });
+
+  // Manager approval workflow
+  app.get("/managers/me/pending-consultants", { preHandler: auth(repo) }, async (request, reply) => {
+    const actor = request.actor!;
+    if (actor.role !== "MANAGER" && actor.role !== "SUPER_ADMIN") {
+      return reply.code(403).send({ error: "Access denied" });
+    }
+    const pending = repo.state.users.filter(
+      (user) =>
+        user.role === "CONSULTANT" &&
+        user.status === "PENDING_MANAGER" &&
+        (actor.role === "SUPER_ADMIN" || user.managerId === actor.id)
+    );
+    return { consultants: pending };
+  });
+
+  app.post("/managers/consultants/:id/approve", { preHandler: auth(repo) }, async (request, reply) => {
+    const actor = request.actor!;
+    if (actor.role !== "MANAGER" && actor.role !== "SUPER_ADMIN") {
+      return reply.code(403).send({ error: "Access denied" });
+    }
+    const { id } = request.params as { id: string };
+    const target = repo.findUserById(id);
+    if (!target || target.role !== "CONSULTANT") {
+      return reply.code(404).send({ error: "Consultant not found" });
+    }
+    if (actor.role === "MANAGER" && target.managerId !== actor.id) {
+      return reply.code(403).send({ error: "Consultant is not attached to this manager" });
+    }
+    target.status = "ACTIVE";
+    target.updatedAt = new Date().toISOString();
+    repo.audit({
+      actorId: actor.id,
+      action: "CONSULTANT_APPROVED",
+      entityType: "User",
+      entityId: target.id,
+      metadataJson: { managerId: target.managerId },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] ?? null
+    });
+    return { user: target };
+  });
+
+  app.post("/managers/consultants/:id/reject", { preHandler: auth(repo) }, async (request, reply) => {
+    const actor = request.actor!;
+    if (actor.role !== "MANAGER" && actor.role !== "SUPER_ADMIN") {
+      return reply.code(403).send({ error: "Access denied" });
+    }
+    const { id } = request.params as { id: string };
+    const body = (request.body as { reason?: string } | undefined) ?? {};
+    const target = repo.findUserById(id);
+    if (!target || target.role !== "CONSULTANT") {
+      return reply.code(404).send({ error: "Consultant not found" });
+    }
+    if (actor.role === "MANAGER" && target.managerId !== actor.id) {
+      return reply.code(403).send({ error: "Consultant is not attached to this manager" });
+    }
+    target.status = "DISABLED";
+    target.updatedAt = new Date().toISOString();
+    repo.audit({
+      actorId: actor.id,
+      action: "CONSULTANT_REJECTED",
+      entityType: "User",
+      entityId: target.id,
+      metadataJson: { managerId: target.managerId, reason: body.reason ?? null },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] ?? null
+    });
+    return { user: target };
+  });
+
+  app.get("/notifications/pending-count", { preHandler: auth(repo) }, async (request) => {
+    const actor = request.actor!;
+    if (actor.role === "MANAGER") {
+      const count = repo.state.users.filter(
+        (user) =>
+          user.role === "CONSULTANT" &&
+          user.status === "PENDING_MANAGER" &&
+          user.managerId === actor.id
+      ).length;
+      return { pendingConsultants: count };
+    }
+    if (actor.role === "SUPER_ADMIN") {
+      const count = repo.state.users.filter(
+        (user) => user.role === "CONSULTANT" && user.status === "PENDING_MANAGER"
+      ).length;
+      return { pendingConsultants: count };
+    }
+    return { pendingConsultants: 0 };
+  });
+
+
+
   app.post("/chat/conversations", { preHandler: auth(repo) }, async (request) => {
     const body = request.body as { title?: string; language?: string; channel?: "WEB" | "EMBED" | "API" };
     return { conversation: chat.createConversation(request.actor!, body.title, body.language, body.channel ?? "WEB") };
