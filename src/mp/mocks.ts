@@ -868,7 +868,7 @@ export function handleMock<T>(
   }
   if (method === "POST" && path === "/kb/documents") {
     if (session?.user.role !== "SUPER_ADMIN") throw new Error("403 — Seul le Super Admin peut alimenter la base de connaissance");
-    const title = body instanceof FormData ? String(body.get("title") ?? "Document") : "Document";
+    const { title, industryTags, pmDomainTags } = extractUploadFields(body);
     const doc: DocumentRecord = {
       id: id("d"),
       title,
@@ -880,6 +880,8 @@ export function handleMock<T>(
       checksum: "mock",
       language: "fr",
       createdAt: now(),
+      industryTags,
+      pmDomainTags,
     };
     documents.unshift(doc);
     return { document: doc } as T;
