@@ -83,6 +83,18 @@ export async function buildApp() {
     },
   };
 
+  // Hybrid auth (Cognito JWT en priorité, HMAC local en fallback dev).
+  const allowLocalAuth = (process.env.ALLOW_LOCAL_AUTH ?? "true") === "true";
+  const authDeps = {
+    repo,
+    cognitoAuth,
+    jitRepo,
+    allowLocalAuth,
+    audit: (e: Parameters<typeof repo.audit>[0]) => repo.audit(e),
+  };
+  const authPre = createAuth(authDeps);
+  const optionalAuthPre = createOptionalAuth(authDeps);
+
   await app.register(cors, {
     origin(origin, cb) {
       if (!origin || origin === env.appOrigin || repo.state.settings.allowedEmbedOrigins.includes(origin)) cb(null, true);
