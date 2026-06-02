@@ -21,6 +21,11 @@ import { EnvEncryptedSecretProvider } from "./security/secretProvider.js";
 import { signToken, verifyToken } from "./security/tokens.js";
 import { hashPassword, verifyDemoPassword } from "./security/passwords.js";
 import { ChatService } from "./services/chatService.js";
+import { bootstrapProviders } from "./bootstrap.js";
+import { AiProviderService, type AiProviderName } from "./services/aiProviderService.js";
+import { jitProvisionUser, type JitRepo } from "./services/jitProvisioning.js";
+import { CognitoAdminProvider } from "./providers/aws/cognito-admin.js";
+import { CognitoAuthProvider, type AppRole } from "./providers/aws/cognito-auth.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -34,6 +39,48 @@ export async function buildApp() {
   const secrets = new EnvEncryptedSecretProvider();
   const chat = new ChatService(repo);
   await repo.ready();
+
+  // AWS providers — null in local/dev, instantiated when env vars are set.
+  const aws = bootstrapProviders();
+  const region = process.env.AWS_REGION ?? "eu-west-3";
+  const cognitoAuth =
+    process.env.COGNITO_USER_POOL_ID && process.env.COGNITO_CLIENT_ID
+      ? new CognitoAuthProvider({
+          region,
+          userPoolId: process.env.COGNITO_USER_POOL_ID,
+          clientId: process.env.COGNITO_CLIENT_ID,
+        })
+      : null;
+  const cognitoAdmin = process.env.COGNITO_USER_POOL_ID
+    ? new CognitoAdminProvider({ region, userPoolId: process.env.COGNITO_USER_POOL_ID })
+    : null;
+  const aiProviderSvc = new AiProviderService({
+    region,
+    audit: (e) =>
+      repo.audit({ ...e, ip: null, userAgent: null }),
+  });
+  const jitRepo: JitRepo = {
+    async findById(id) {
+      const u = repo.findUserById(id);
+      return u ? toJit(u) : null;
+    },
+    async create(input) {
+      const now = new Date().toISOString();
+      const user: User = {
+        ...input,
+        createdAt: now,
+        updatedAt: now,
+      } as unknown as User;
+      repo.state.users.push(user);
+      return toJit(user);
+    },
+    async update(id, patch) {
+      const u = repo.findUserById(id);
+      if (!u) throw new Error("User not found");
+      Object.assign(u, patch, { updatedAt: new Date().toISOString() });
+      return toJit(u);
+    },
+  };
 
   await app.register(cors, {
     origin(origin, cb) {
@@ -130,6 +177,44 @@ export async function buildApp() {
   });
 
   app.get("/auth/me", { preHandler: auth(repo) }, async (request) => ({ user: request.actor }));
+
+  /**
+   * Cognito-backed bootstrap endpoint.
+   *
+   * Verifies the Cognito access token from the Authorization header, then
+   * just-in-time creates (or updates) the matching `User` row. Used by the
+   * frontend `cognitoProvider` after every login / refresh.
+   *
+   * In local mode (no Cognito configured) this aliases to /auth/me.
+   */
+  app.get("/me", async (request, reply) => {
+    if (!cognitoAuth) {
+      // Fall back to local session token.
+      try {
+        const header = request.headers.authorization;
+        const payload = verifyToken(header?.startsWith("Bearer ") ? header.slice(7) : "", "access");
+        const actor = repo.findUserById(payload.sub);
+        if (!actor) return reply.code(401).send({ error: "Unauthorized" });
+        return { user: actor };
+      } catch {
+        return reply.code(401).send({ error: "Unauthorized" });
+      }
+    }
+    try {
+      const claims = await cognitoAuth.verify(request.headers.authorization);
+      const user = await jitProvisionUser(claims, {
+        repo: jitRepo,
+        audit: (e) =>
+          repo.audit({ ...e, ip: request.ip, userAgent: request.headers["user-agent"] ?? null }),
+      });
+      return { user };
+    } catch (err) {
+      app.log.warn({ err }, "/me cognito verification failed");
+      return reply.code(401).send({ error: "Unauthorized" });
+    }
+  });
+
+
 
   app.post("/auth/first-visit/manager", { preHandler: auth(repo) }, async (request, reply) => {
     const actor = request.actor!;
@@ -242,6 +327,13 @@ export async function buildApp() {
     }
     target.status = "ACTIVE";
     target.updatedAt = new Date().toISOString();
+    if (cognitoAdmin) {
+      try {
+        await cognitoAdmin.enableUser(target.email);
+      } catch (err) {
+        app.log.warn({ err, userId: target.id }, "cognito enableUser failed on approve");
+      }
+    }
     repo.audit({
       actorId: actor.id,
       action: "CONSULTANT_APPROVED",
@@ -564,10 +656,30 @@ export async function buildApp() {
 
   app.post("/superadmin/users", { preHandler: auth(repo) }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
-    const body = request.body as Partial<User> & { role?: Role };
+    const body = request.body as Partial<User> & { role?: Role; temporaryPassword?: string };
     if (!body.email || !body.name || !body.role) return reply.code(400).send({ error: "Missing email, name or role" });
+
+    // Dual-write to Cognito when configured. Cognito is source of truth for the
+    // user's `sub`, which becomes the DB primary key (matches `/me` JIT path).
+    let id = `usr-${crypto.randomUUID()}`;
+    if (cognitoAdmin) {
+      try {
+        const { sub } = await cognitoAdmin.createUser({
+          email: body.email,
+          name: body.name,
+          role: body.role as AppRole,
+          temporaryPassword: body.temporaryPassword,
+          suppressInvite: false,
+        });
+        id = sub;
+      } catch (err) {
+        app.log.error({ err }, "cognito AdminCreateUser failed");
+        return reply.code(502).send({ error: "Identity provider create failed" });
+      }
+    }
+
     const user: User = {
-      id: `usr-${crypto.randomUUID()}`,
+      id,
       email: body.email,
       name: body.name,
       role: body.role,
@@ -578,9 +690,25 @@ export async function buildApp() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    repo.state.users.push(user);
+    try {
+      repo.state.users.push(user);
+    } catch (err) {
+      // Rollback Cognito if DB persistence fails.
+      if (cognitoAdmin) await cognitoAdmin.deleteUser(body.email).catch(() => undefined);
+      throw err;
+    }
+    repo.audit({
+      actorId: request.actor!.id,
+      action: "USER_CREATED",
+      entityType: "User",
+      entityId: user.id,
+      metadataJson: { role: user.role, cognito: Boolean(cognitoAdmin) },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] ?? null
+    });
     return { user };
   });
+
 
   app.patch("/superadmin/users/:id", { preHandler: auth(repo) }, async (request, reply) => {
     if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
@@ -818,10 +946,64 @@ export async function buildApp() {
     return { ok, latencyMs, checkedAt, message };
   });
 
+  /* ------------------------------------------------------------------ */
+  /* AI providers backed by AWS Secrets Manager (Vague 1)               */
+  /* The legacy /superadmin/ai-providers routes above stay in place for */
+  /* the demo / in-memory mode; these scoped /aws routes are the prod   */
+  /* path used when SECRETS_PREFIX is configured.                       */
+  /* ------------------------------------------------------------------ */
+
+  app.get("/superadmin/ai-providers/aws", { preHandler: auth(repo) }, async (request, reply) => {
+    if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
+    return { providers: await aiProviderSvc.list() };
+  });
+
+  app.post("/superadmin/ai-providers/aws", { preHandler: auth(repo) }, async (request, reply) => {
+    if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
+    const body = request.body as { provider?: AiProviderName; apiKey?: string; model?: string; configJson?: Record<string, unknown> };
+    if (!body.provider || !body.apiKey) return reply.code(400).send({ error: "provider and apiKey required" });
+    try {
+      const out = await aiProviderSvc.upsert(
+        body.provider,
+        { apiKey: body.apiKey, model: body.model, configJson: body.configJson },
+        request.actor!.id
+      );
+      return { provider: out };
+    } catch (err) {
+      app.log.error({ err }, "ai-provider upsert failed");
+      return reply.code(502).send({ error: (err as Error).message });
+    }
+  });
+
+  app.patch("/superadmin/ai-providers/aws/:provider/rotate", { preHandler: auth(repo) }, async (request, reply) => {
+    if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
+    const { provider } = request.params as { provider: AiProviderName };
+    const body = request.body as { apiKey?: string };
+    if (!body.apiKey) return reply.code(400).send({ error: "apiKey required" });
+    try {
+      const out = await aiProviderSvc.rotate(provider, body.apiKey, request.actor!.id);
+      return { provider: out };
+    } catch (err) {
+      return reply.code(502).send({ error: (err as Error).message });
+    }
+  });
+
+  app.delete("/superadmin/ai-providers/aws/:provider", { preHandler: auth(repo) }, async (request, reply) => {
+    if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
+    const { provider } = request.params as { provider: AiProviderName };
+    try {
+      await aiProviderSvc.delete(provider, request.actor!.id);
+      return { ok: true };
+    } catch (err) {
+      return reply.code(502).send({ error: (err as Error).message });
+    }
+  });
+
   app.get("/superadmin/audit/events", { preHandler: auth(repo) }, async (request, reply) => {
     if (!canViewAudit(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     return { events: repo.state.auditEvents };
   });
+
 
   app.get("/superadmin/compliance/system-card", { preHandler: auth(repo) }, async (request, reply) => {
     if (!canViewAudit(request.actor!)) return reply.code(403).send({ error: "Access denied" });
@@ -971,3 +1153,17 @@ function isAllowedEmbedOrigin(request: FastifyRequest, repo: AppRepository): boo
   if (!origin) return true;
   return repo.state.settings.allowedEmbedOrigins.includes(origin);
 }
+
+function toJit(u: User): import("./services/jitProvisioning.js").JitUser {
+  return {
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    role: u.role as AppRole,
+    status: (u.status === "ACTIVE" || u.status === "PENDING_MANAGER" || u.status === "DISABLED" ? u.status : "ACTIVE") as "ACTIVE" | "PENDING_MANAGER" | "DISABLED",
+    managerId: u.managerId ?? null,
+    department: u.department ?? null,
+    language: u.language ?? "fr",
+  };
+}
+
