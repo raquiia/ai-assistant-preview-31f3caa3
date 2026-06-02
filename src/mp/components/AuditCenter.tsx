@@ -60,12 +60,12 @@ export function AuditCenter({ api }: { api: ApiClient }) {
 
   useEffect(() => {
     api
-      .get<{ events: AuditEvent[] }>("/superadmin/audit/events")
-      .then((payload) => setEvents(payload.events))
+      .get<{ events?: AuditEvent[] }>("/superadmin/audit/events")
+      .then((payload) => setEvents(payload?.events ?? []))
       .catch(() => setEvents([]));
     api
       .get<SystemCardPayload>("/superadmin/compliance/system-card")
-      .then((payload) => setCard(payload.systemCard))
+      .then((payload) => setCard(payload?.systemCard ?? null))
       .catch(() => setCard(null));
   }, [api]);
 
