@@ -1153,3 +1153,18 @@ function isAllowedEmbedOrigin(request: FastifyRequest, repo: AppRepository): boo
   if (!origin) return true;
   return repo.state.settings.allowedEmbedOrigins.includes(origin);
 }
+
+function toJit(u: User): import("./services/jitProvisioning.js").JitUser {
+  return {
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    role: u.role as AppRole,
+    status: (u.status === "ACTIVE" || u.status === "PENDING_MANAGER" || u.status === "DISABLED" ? u.status : "ACTIVE") as "ACTIVE" | "PENDING_MANAGER" | "DISABLED",
+    managerId: u.managerId ?? null,
+    department: u.department ?? null,
+    language: u.language ?? "fr",
+  };
+}
+
+}
