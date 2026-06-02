@@ -1,118 +1,129 @@
-# Rendre le backend AWS prêt à déployer et fonctionnel
+# Plan — Auth Cognito côté frontend avec fallback local
 
-Choix retenus :
-- **Périmètre** : Infra Terraform complète + adaptateurs AWS dans le code applicatif.
-- **Infra** : Région `eu-west-3`, VPC `10.0.0.0/16`, RDS `db.t4g.medium` Multi-AZ, env `dev` seul, domaine TBD (CloudFront avec cert ACM créé conditionnellement).
-- **Code** : Garder l'in-memory comme fallback ; basculer sur Prisma quand `DATABASE_URL` est défini.
-- **Déploiement** : Script `deploy.sh` (build → push ECR → terraform apply → migrate).
+## Objectif
 
-## Ce que je vais livrer
+Permettre au frontend (`src/mp/`) de basculer entre :
+- **Mode `local`** (défaut, dev) : POST `/auth/login` → JWT custom du backend Fastify
+- **Mode `cognito`** (prod AWS) : SDK Cognito → JWT RS256 du User Pool
 
-### 1. Infra Terraform complète (`_backend-reference/infra/aws/`)
+Le choix se fait via une variable d'environnement Vite, **sans rework visuel** de `LoginPage.tsx`.
 
-Découpée en modules locaux dans des fichiers séparés pour rester lisible :
+## Architecture cible
 
-- `network.tf` : VPC `10.0.0.0/16` sur 3 AZ, subnets publics (ALB) + privés (ECS/RDS/AOSS), 1 NAT GW, route tables, **VPC endpoints** S3 (gateway), Secrets Manager, KMS, ECR API/DKR, CloudWatch Logs (interface).
-- `security.tf` : SG ALB, SG ECS api, SG ECS worker, SG RDS, SG AOSS, SG VPC endpoints. Règles least-privilege (ALB→ECS:4000, ECS→RDS:5432, ECS→AOSS:443).
-- `rds.tf` : `aws_db_subnet_group`, `aws_db_instance` Postgres 16 `db.t4g.medium` Multi-AZ, encryption KMS, backups 14j, deletion protection, parameter group avec `log_statement=ddl`. Master password stocké dans Secrets Manager.
-- `aoss.tf` : OpenSearch Serverless collection `VECTORSEARCH` + encryption/network/data access policies.
-- `ecr.tf` : 3 repos (`api`, `web`, `worker`) avec scan-on-push et lifecycle (garde 10 dernières).
-- `ecs.tf` : Cluster Fargate Container-Insights, 3 task definitions (api/web/worker), 3 services, ALB + 2 target groups (`/` → web, `/api/*` `/auth/*` `/admin/*` `/superadmin/*` `/chat/*` `/embed/*` `/source/*` `/managers/*` → api). Worker sans ALB. Autoscaling target tracking sur CPU 60 %.
-- `iam.tf` : `ecs_task_execution_role` (pull ECR + logs + secrets), `task_role_api` (S3 RW knowledge prefix, SQS send, Secrets Manager read scoped, AOSS read/write collection, KMS decrypt), `task_role_worker` (S3 RW, SQS receive/delete, AOSS write, Textract/Transcribe optionnel mais commenté).
-- `cloudfront.tf` : Distribution `web` (origin = ALB pour `apps/web`), distribution `embed` (origin = ALB chemin `/embed/*`), WAF web ACL (AWS Managed Common Rules + rate limit), response headers policy (HSTS, strict CSP, `frame-ancestors` paramétrable). ACM cert conditionnel via `var.web_domain` (skip si vide).
-- `cloudwatch.tf` : dashboard avec widgets (ALB 5xx, ECS CPU/mem, RDS connections, SQS depth, AOSS errors), alarmes SNS topic (`var.alarm_email`).
-
-`main.tf` devient juste le bootstrap (provider, KMS, locals) et `outputs.tf` est étendu.
-
-### 2. Adaptateurs AWS dans le code (`_backend-reference/`)
-
-Chaque adapter respecte le provider boundary existant. Switch via env vars : si présent → adapter AWS, sinon → impl en mémoire.
-
-- `packages/shared/src/providers/` : interfaces `StorageProvider`, `QueueProvider`, `VectorProvider`, `SecretProvider`, `AuthProvider` (si pas déjà extraites — vérification à l'exécution).
-- `apps/api/src/providers/aws/`
-  - `s3-storage.ts` : `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` (presigned PUT/GET).
-  - `sqs-queue.ts` : `@aws-sdk/client-sqs` send.
-  - `secrets-manager.ts` : `@aws-sdk/client-secrets-manager` avec cache 5 min in-memory.
-  - `cognito-auth.ts` : vérif JWT Cognito via JWKS (`jose`), mapping `cognito:groups` → rôles app (`CONSULTANT`/`MANAGER`/`SUPER_ADMIN`/`AUDITOR`).
-  - `opensearch-vector.ts` : `@opensearch-project/opensearch` + `@aws-sdk/credential-provider-node` signer SigV4 pour AOSS.
-- `apps/api/src/repository/` :
-  - `index.ts` : factory qui exporte `inMemoryRepo` si `DATABASE_URL` absent, sinon `prismaRepo`.
-  - `prisma-repo.ts` : implémentation Prisma des méthodes utilisées par les services (users, conversations, messages, responses, feedback, adminComments, documents, chunks, prompts, providerConfigs, auditEvents). Mappage 1-pour-1 avec l'API in-memory existante pour ne pas casser les call sites.
-- `apps/worker/src/providers/aws/` : worker SQS long-poll qui pop les jobs d'ingestion et appelle le pipeline existant ; écrit dans S3 + AOSS.
-- `apps/api/src/bootstrap.ts` : sélection des providers selon env (`NODE_ENV`, `DATABASE_URL`, `AWS_REGION`, `S3_KNOWLEDGE_BUCKET`, `SQS_INGESTION_URL`, `COGNITO_USER_POOL_ID`, `AOSS_ENDPOINT`, `SECRETS_PREFIX`).
-
-Ajout des deps :
-```
-@aws-sdk/client-s3, @aws-sdk/s3-request-presigner,
-@aws-sdk/client-sqs, @aws-sdk/client-secrets-manager,
-@aws-sdk/credential-provider-node, @aws-sdk/signature-v4,
-@opensearch-project/opensearch, jose,
-@prisma/client + prisma (dev)
+```text
+LoginPage.tsx
+   │
+   ▼
+authProvider (interface)
+   ├── LocalAuthProvider    → POST /auth/login (actuel)
+   └── CognitoAuthProvider  → amazon-cognito-identity-js
+              │
+              ▼
+       Session { token, user, refreshToken? }
+              │
+              ▼
+       ApiClient (Authorization: Bearer <token>)
+              │
+              ▼
+       API Fastify ── verify() ──┬── tokens.ts (HS256 local)
+                                 └── providers/aws/cognito-auth.ts (RS256 JWKS)
 ```
 
-### 3. Dockerfiles + image runtime
+Le backend a déjà les deux vérificateurs en place (`security/tokens.ts` + `providers/aws/cognito-auth.ts`). Côté frontend, seule la **production du token** change.
 
-- `apps/api/Dockerfile` : multi-stage Node 22 alpine, build TS, runtime non-root.
-- `apps/worker/Dockerfile` : idem.
-- `apps/web/Dockerfile` : build Vite → nginx alpine servant le bundle statique.
-- `.dockerignore` racine.
+## Changements frontend
 
-### 4. Script de déploiement `_backend-reference/scripts/deploy.sh`
-
-Pipeline idempotent :
-
+### 1. Variables d'environnement (`.env.example` + types Vite)
 ```
-1. Vérifie aws cli, terraform, docker, jq, AWS_PROFILE et AWS_REGION.
-2. terraform -chdir=infra/aws init && terraform apply -auto-approve
-   pour créer ECR/RDS/etc. (1ère passe sans images = task defs commentées).
-3. Récupère les URLs ECR via terraform output.
-4. docker buildx build --platform linux/amd64 + push api/web/worker.
-5. terraform apply -auto-approve (2e passe avec les images réelles).
-6. Récupère DATABASE_URL depuis Secrets Manager → npx prisma migrate deploy
-   via une task ECS run-task one-shot.
-7. Affiche l'URL ALB / CloudFront et le user_pool_id.
+VITE_AUTH_MODE=local           # ou "cognito"
+VITE_COGNITO_REGION=eu-west-3
+VITE_COGNITO_USER_POOL_ID=
+VITE_COGNITO_CLIENT_ID=
+```
+Ces valeurs sont publiques (publishable) → OK dans le bundle.
+
+### 2. Nouvelle abstraction `src/mp/auth/providers.ts`
+Interface commune :
+```ts
+interface AuthProvider {
+  signIn(email, password): Promise<Session>
+  signOut(session): Promise<void>
+  refresh?(session): Promise<Session>
+  getUserFromToken(token): Promise<User>  // pour rehydrate
+}
 ```
 
-Plus `scripts/destroy.sh` pour teardown propre (skip RDS deletion protection).
+### 3. Deux implémentations
+- `src/mp/auth/localProvider.ts` — extrait le code actuel de `LoginPage.submit()`
+- `src/mp/auth/cognitoProvider.ts` — utilise `amazon-cognito-identity-js` :
+  - `CognitoUser.authenticateUser()` → récupère `idToken` + `refreshToken`
+  - Map des `cognito:groups` → `Role` (déjà fait côté backend, mais on en a besoin pour l'UI immédiate)
+  - Récupère le profil applicatif via `GET /me` (endpoint backend qui lit `request.user` injecté par le middleware Cognito)
 
-### 5. Runbook `_backend-reference/DEPLOYMENT.md`
+### 4. Factory `src/mp/auth/index.ts`
+```ts
+export const authProvider: AuthProvider =
+  import.meta.env.VITE_AUTH_MODE === "cognito"
+    ? new CognitoAuthProvider({...})
+    : new LocalAuthProvider(api);
+```
 
-Document opérationnel pas-à-pas :
-- Prérequis (compte AWS, AWS CLI configuré, Docker Desktop, Terraform ≥1.8).
-- Variables à customiser dans `terraform.tfvars.example` (région, CIDR, domaine optionnel, alarm_email).
-- Création d'un premier utilisateur Cognito via AWS CLI (commande prête).
-- Comment basculer le frontend Lovable : `VITE_API_URL=https://<alb-dns>` + `VITE_USE_MOCKS=false`.
-- Procédure de rollback (terraform state + ECR image tags).
-- Surveillance post-deploy (dashboards CloudWatch + alarmes).
+### 5. Refactor minimal
+- **`LoginPage.tsx`** : remplace l'appel direct `api.post("/auth/login", ...)` par `authProvider.signIn(email, password)`. **Zéro changement visuel.** Le bloc "Comptes disponibles" devient conditionnel (caché en mode cognito).
+- **`auth.tsx` (AuthProvider React)** : `logout()` appelle `authProvider.signOut()` ; au boot, si session stockée → option `refresh()`.
+- **`api.ts` (ApiClient)** : aucun changement — continue à attacher `Bearer <token>` ; le backend route vers le bon verifier selon l'émetteur.
 
-## Limites assumées
+### 6. Dépendance
+```
+bun add amazon-cognito-identity-js
+```
+(léger, ~50KB gzip, pas besoin de tout `aws-amplify`)
 
-- Je **ne peux pas exécuter** `terraform apply` ni `docker push` depuis ce sandbox — tu lances `deploy.sh` toi-même avec tes credentials AWS.
-- Je **ne peux pas tester end-to-end** sans environnement AWS réel. Le code compile en local et respecte les contrats existants, mais le premier deploy révélera typiquement 1–3 itérations à faire (security group ports, IAM scoping, AOSS access policies — corrigeables ensuite).
-- **Extraction lourde** (Textract/Transcribe) reste hors scope comme convenu.
-- **CI/CD GitHub Actions** non scaffold (tu as choisi `deploy.sh`).
-- **Domaine custom** : si vide, CloudFront servira sur le hostname `*.cloudfront.net`. Tu pourras ajouter le cert ACM us-east-1 plus tard.
+## Changements backend (mineurs)
 
-## Fichiers touchés
+Dans `_backend-reference/apps/api/src/app.ts` :
+- Middleware d'auth déjà conditionné par `bootstrap.ts` (Cognito si `COGNITO_USER_POOL_ID` présent, sinon tokens locaux). **Rien à changer.**
+- Vérifier qu'un endpoint `GET /me` existe et retourne le `User` applicatif à partir de `request.user.sub` (créer le user en DB au premier login si absent — "JIT provisioning"). À ajouter si manquant.
 
-Nouveaux :
-- `_backend-reference/infra/aws/{network,security,rds,aoss,ecr,ecs,iam,cloudfront,cloudwatch}.tf`
-- `_backend-reference/infra/aws/terraform.tfvars.example`
-- `_backend-reference/apps/{api,worker,web}/Dockerfile`
-- `_backend-reference/.dockerignore`
-- `_backend-reference/apps/api/src/providers/aws/*.ts` (5 adapters)
-- `_backend-reference/apps/api/src/repository/{index,prisma-repo}.ts`
-- `_backend-reference/apps/api/src/bootstrap.ts`
-- `_backend-reference/apps/worker/src/providers/aws/sqs-consumer.ts`
-- `_backend-reference/scripts/{deploy,destroy}.sh`
-- `_backend-reference/DEPLOYMENT.md`
+## Bootstrap utilisateur en prod
 
-Modifiés :
-- `_backend-reference/infra/aws/main.tf` (allégé, juste bootstrap)
-- `_backend-reference/infra/aws/variables.tf` (+ vars network/RDS/domaine/email)
-- `_backend-reference/infra/aws/outputs.tf` (+ ALB DNS, CloudFront, ECR URLs, RDS endpoint)
-- `_backend-reference/package.json` (+ deps AWS SDK + Prisma) et `apps/api/package.json`, `apps/worker/package.json`
-- `_backend-reference/apps/api/src/state.ts` (factory repo)
-- `_backend-reference/BACKEND_AWS_AUDIT.md` (statut mis à jour : "P0 #2/#3/#4 traités").
+Documenté brièvement dans `DEPLOYMENT.md` (déjà fait) — création du premier admin via :
+```
+aws cognito-idp admin-create-user --user-pool-id ... --username admin@... \
+  --user-attributes Name=email,Value=admin@... \
+  --temporary-password '...'
+aws cognito-idp admin-add-user-to-group --group-name SUPER_ADMIN ...
+```
 
-Aucune modification du frontend Lovable `src/**`. Le basculement mocks→AWS se fait par 2 env vars sans rebuild de code.
+## Fichiers à créer / modifier
+
+**Créer**
+- `src/mp/auth/providers.ts` (interface + types)
+- `src/mp/auth/localProvider.ts`
+- `src/mp/auth/cognitoProvider.ts`
+- `src/mp/auth/index.ts` (factory)
+
+**Modifier**
+- `src/mp/components/LoginPage.tsx` (1 ligne effective : remplace `api.post` par `authProvider.signIn`)
+- `src/mp/auth.tsx` (logout → `authProvider.signOut`)
+- `.env.example` (+ `vite-env.d.ts` si typage strict)
+- `package.json` (dépendance)
+- `_backend-reference/apps/api/src/app.ts` (endpoint `/me` si absent + JIT user provisioning depuis claims Cognito)
+
+**Inchangé**
+- Tout le reste de l'UI (`ChatShell`, `AdminLayout`, etc.)
+- Le visuel de `LoginPage`
+- L'ApiClient et la signature des requêtes
+
+## Validation
+
+1. `VITE_AUTH_MODE=local` → comportement actuel identique (login dev fonctionne)
+2. `VITE_AUTH_MODE=cognito` + User Pool dummy → erreur claire si vars manquantes
+3. Build prod : pas de leak du SDK Cognito dans le bundle local (code-split dynamique de `cognitoProvider.ts` si bundle size critique)
+
+## Hors scope (à faire plus tard si besoin)
+
+- Cognito Hosted UI (redirect OAuth) — on reste sur formulaire custom
+- MFA / SMS challenge — Cognito le supporte mais ajoute des étapes UI
+- "Forgot password" flow Cognito — peut être ajouté en V2
+- Migration des utilisateurs locaux existants vers Cognito (script séparé)
