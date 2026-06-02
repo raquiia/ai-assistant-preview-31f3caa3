@@ -404,8 +404,16 @@ function sessionFor(email: string): Session | null {
   };
 }
 
-function buildAnswer(question: string): ChatAnswerPayload {
+function buildAnswer(
+  question: string,
+  filters?: { industryTags?: string[]; pmDomainTags?: string[] },
+): ChatAnswerPayload {
   const responseId = id("r");
+  const sources = mockSources(filters);
+  const orientation =
+    filters && ((filters.industryTags?.length ?? 0) + (filters.pmDomainTags?.length ?? 0) > 0)
+      ? ` (orientée ${[...(filters.industryTags ?? []), ...(filters.pmDomainTags ?? [])].join(", ")})`
+      : "";
   return {
     response: {
       id: responseId,
@@ -413,7 +421,7 @@ function buildAnswer(question: string): ChatAnswerPayload {
       provider: "mistral",
       model: "mistral-large-latest",
       promptVersionId: "p-1",
-      content: `Réponse mockée à : "${question.slice(0, 80)}". Brancher VITE_USE_MOCKS=false pour utiliser l'API Fastify.`,
+      content: `Réponse mockée${orientation} à : "${question.slice(0, 80)}". Brancher VITE_USE_MOCKS=false pour utiliser l'API Fastify.`,
       confidence: 0.78,
       latencyMs: 420,
       fallbackUsed: false,
@@ -430,8 +438,12 @@ function buildAnswer(question: string): ChatAnswerPayload {
       estimatedCost: 0.0021,
       currency: "EUR",
     },
-    answer: `Réponse mockée à : "${question.slice(0, 80)}". Brancher VITE_USE_MOCKS=false pour utiliser l'API Fastify.`,
-    sources: mockSources(),
+    answer: `Réponse mockée${orientation} à : "${question.slice(0, 80)}". Brancher VITE_USE_MOCKS=false pour utiliser l'API Fastify.`,
+    sources,
+    appliedFilters: {
+      industryTags: filters?.industryTags ?? [],
+      pmDomainTags: filters?.pmDomainTags ?? [],
+    },
   };
 }
 
