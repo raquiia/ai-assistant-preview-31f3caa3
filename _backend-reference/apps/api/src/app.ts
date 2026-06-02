@@ -19,7 +19,7 @@ import { chunkDocument } from "@mp/rag";
 import { AppRepository } from "./state.js";
 import { EnvEncryptedSecretProvider } from "./security/secretProvider.js";
 import { signToken, verifyToken } from "./security/tokens.js";
-import { verifyDemoPassword } from "./security/passwords.js";
+import { hashPassword, verifyDemoPassword, verifyPassword } from "./security/passwords.js";
 import { ChatService } from "./services/chatService.js";
 
 declare module "fastify" {
