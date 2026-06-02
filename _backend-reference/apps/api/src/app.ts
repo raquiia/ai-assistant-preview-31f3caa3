@@ -327,6 +327,13 @@ export async function buildApp() {
     }
     target.status = "ACTIVE";
     target.updatedAt = new Date().toISOString();
+    if (cognitoAdmin) {
+      try {
+        await cognitoAdmin.enableUser(target.email);
+      } catch (err) {
+        app.log.warn({ err, userId: target.id }, "cognito enableUser failed on approve");
+      }
+    }
     repo.audit({
       actorId: actor.id,
       action: "CONSULTANT_APPROVED",
