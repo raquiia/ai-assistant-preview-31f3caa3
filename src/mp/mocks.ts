@@ -868,15 +868,18 @@ export function handleMock<T>(
   }
   m = match(path, "/kb/documents/:id/publish");
   if (method === "POST" && m) {
+    if (session?.user.role !== "SUPER_ADMIN") throw new Error("403 — Réservé au Super Admin");
     const doc = documents.find((d) => d.id === m!.id);
     if (doc) doc.status = "PUBLISHED";
     return { ok: true } as T;
   }
   m = match(path, "/kb/documents/:id/reindex");
   if (method === "POST" && m) {
+    if (session?.user.role !== "SUPER_ADMIN") throw new Error("403 — Réservé au Super Admin");
     return { ok: true } as T;
   }
   if (method === "POST" && path === "/kb/upload") {
+    if (session?.user.role !== "SUPER_ADMIN") throw new Error("403 — Seul le Super Admin peut uploader des documents");
     const title =
       body instanceof FormData
         ? String(body.get("title") ?? "Document")
