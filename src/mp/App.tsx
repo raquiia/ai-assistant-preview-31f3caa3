@@ -67,6 +67,7 @@ export function MpApp() {
     else window.localStorage.removeItem(SESSION_KEY);
   }
 
+  if (!hydrated) return <div className="min-h-screen bg-slate-50" />;
   if (!session) return <LoginPage onLogin={handleSession} />;
 
   if (session.user.role === "CONSULTANT" && session.user.status === "PENDING_MANAGER") {
