@@ -946,7 +946,60 @@ export async function buildApp() {
     return { ok, latencyMs, checkedAt, message };
   });
 
-  app.get("/superadmin/audit/events", { preHandler: auth(repo) }, async (request, reply) => {
+  /* ------------------------------------------------------------------ */
+  /* AI providers backed by AWS Secrets Manager (Vague 1)               */
+  /* The legacy /superadmin/ai-providers routes above stay in place for */
+  /* the demo / in-memory mode; these scoped /aws routes are the prod   */
+  /* path used when SECRETS_PREFIX is configured.                       */
+  /* ------------------------------------------------------------------ */
+
+  app.get("/superadmin/ai-providers/aws", { preHandler: auth(repo) }, async (request, reply) => {
+    if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
+    return { providers: await aiProviderSvc.list() };
+  });
+
+  app.post("/superadmin/ai-providers/aws", { preHandler: auth(repo) }, async (request, reply) => {
+    if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
+    const body = request.body as { provider?: AiProviderName; apiKey?: string; model?: string; configJson?: Record<string, unknown> };
+    if (!body.provider || !body.apiKey) return reply.code(400).send({ error: "provider and apiKey required" });
+    try {
+      const out = await aiProviderSvc.upsert(
+        body.provider,
+        { apiKey: body.apiKey, model: body.model, configJson: body.configJson },
+        request.actor!.id
+      );
+      return { provider: out };
+    } catch (err) {
+      app.log.error({ err }, "ai-provider upsert failed");
+      return reply.code(502).send({ error: (err as Error).message });
+    }
+  });
+
+  app.patch("/superadmin/ai-providers/aws/:provider/rotate", { preHandler: auth(repo) }, async (request, reply) => {
+    if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
+    const { provider } = request.params as { provider: AiProviderName };
+    const body = request.body as { apiKey?: string };
+    if (!body.apiKey) return reply.code(400).send({ error: "apiKey required" });
+    try {
+      const out = await aiProviderSvc.rotate(provider, body.apiKey, request.actor!.id);
+      return { provider: out };
+    } catch (err) {
+      return reply.code(502).send({ error: (err as Error).message });
+    }
+  });
+
+  app.delete("/superadmin/ai-providers/aws/:provider", { preHandler: auth(repo) }, async (request, reply) => {
+    if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
+    const { provider } = request.params as { provider: AiProviderName };
+    try {
+      await aiProviderSvc.delete(provider, request.actor!.id);
+      return { ok: true };
+    } catch (err) {
+      return reply.code(502).send({ error: (err as Error).message });
+    }
+  });
+
+
     if (!canViewAudit(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     return { events: repo.state.auditEvents };
   });
