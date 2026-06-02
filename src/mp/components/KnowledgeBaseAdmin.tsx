@@ -1,19 +1,21 @@
-import { FileText, Pencil, RefreshCcw, ShieldCheck, Tag, UploadCloud } from "lucide-react";
-import { useEffect, useState } from "react";
+import { FileText, Filter, Pencil, RefreshCcw, Search, ShieldCheck, Tag, UploadCloud, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import type { DocumentRecord } from "../shared";
 import { INDUSTRIES, PM_DOMAINS, labelForIndustry, labelForPmDomain } from "../shared";
 import type { ApiClient } from "../api";
 import type { Session } from "../types";
 import { AdminLayout } from "./AdminLayout";
-import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
 import { UploadPanel } from "./UploadPanel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 interface DocumentDetail {
