@@ -2,7 +2,7 @@ import {
   ArrowUp,
   ChevronRight,
   Database,
-  Loader2,
+  
   MessageSquarePlus,
   PanelRightOpen,
   Sparkles,
