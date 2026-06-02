@@ -398,8 +398,21 @@ export function handleMock<T>(
     return { managers: mgrs } as T;
   }
   if (method === "POST" && path === "/users/me/manager") {
-    return { ok: true } as T;
+    const managerId = (body as { managerId?: string })?.managerId ?? null;
+    const current = session?.user;
+    if (current) {
+      const stored = users.find((u) => u.id === current.id);
+      if (stored) {
+        stored.managerId = managerId;
+        stored.status = "ACTIVE";
+        stored.updatedAt = now();
+        return { user: stored } as T;
+      }
+      return { user: { ...current, managerId, status: "ACTIVE" } } as T;
+    }
+    return { user: users[0] } as T;
   }
+
 
   // HISTORY
   if (method === "GET" && path.startsWith("/admin/history")) {
