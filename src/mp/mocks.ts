@@ -981,10 +981,88 @@ export function handleMock<T>(
     prompts.push(p);
     return { prompt: p } as T;
   }
-  if (method === "GET" && path === "/admin/providers") return { providers } as T;
-  m = match(path, "/admin/providers/:id");
+  if (method === "GET" && path === "/admin/providers") {
+    const masked = providers.map((p) => ({
+      provider: p.provider,
+      model: p.model,
+      configJson: p.configJson,
+      maskedKey: p.maskedKey ?? null,
+      updatedAt: p.updatedAt,
+    }));
+    return { providers: masked } as T;
+  }
+  if (method === "POST" && path === "/admin/providers") {
+    const payload = (body ?? {}) as {
+      provider?: string;
+      apiKey?: string;
+      model?: string;
+      configJson?: Record<string, unknown>;
+    };
+    if (!payload.provider || !payload.apiKey) throw new Error("provider et apiKey requis");
+    const existing = providers.find((p) => p.provider === payload.provider);
+    const masked = `••••••${payload.apiKey.slice(-4)}`;
+    if (existing) {
+      existing.model = payload.model ?? existing.model;
+      existing.configJson = payload.configJson ?? existing.configJson;
+      existing.maskedKey = masked;
+      existing.active = true;
+      existing.updatedAt = now();
+    } else {
+      providers.push({
+        id: `ai-${providers.length + 1}`,
+        provider: payload.provider as AiProviderConfig["provider"],
+        model: payload.model ?? "",
+        configJson: payload.configJson ?? {},
+        active: true,
+        maskedKey: masked,
+        createdAt: now(),
+        updatedAt: now(),
+      });
+    }
+    pushProviderHistory(payload.provider, "set", session);
+    return { ok: true } as T;
+  }
+  m = match(path, "/admin/providers/:id/rotate");
   if (method === "PATCH" && m) {
-    const prov = providers.find((p) => p.id === m!.id);
+    const payload = (body ?? {}) as {
+      apiKey?: string;
+      model?: string;
+      configJson?: Record<string, unknown>;
+    };
+    if (!payload.apiKey) throw new Error("apiKey requis");
+    const prov = providers.find((p) => p.provider === m!.id);
+    if (!prov) throw new Error("Provider introuvable");
+    prov.maskedKey = `••••••${payload.apiKey.slice(-4)}`;
+    if (payload.model) prov.model = payload.model;
+    if (payload.configJson) prov.configJson = payload.configJson;
+    prov.updatedAt = now();
+    pushProviderHistory(m.id, "rotate", session);
+    return { ok: true } as T;
+  }
+  m = match(path, "/admin/providers/:id/history");
+  if (method === "GET" && m) {
+    return { events: providerHistory[m.id] ?? [] } as T;
+  }
+  m = match(path, "/admin/providers/:id/test");
+  if (method === "POST" && m) {
+    const prov = providers.find((p) => p.provider === m!.id);
+    if (!prov) return { ok: false, latencyMs: 0, checkedAt: now() } as T;
+    const ok = Boolean(prov.maskedKey);
+    return { ok, latencyMs: 120 + Math.floor(Math.random() * 240), checkedAt: now() } as T;
+  }
+  m = match(path, "/admin/providers/:id");
+  if (method === "DELETE" && m) {
+    const prov = providers.find((p) => p.provider === m!.id);
+    if (prov) {
+      prov.maskedKey = null;
+      prov.active = false;
+      prov.updatedAt = now();
+    }
+    pushProviderHistory(m.id, "delete", session);
+    return { ok: true } as T;
+  }
+  if (method === "PATCH" && m) {
+    const prov = providers.find((p) => p.provider === m!.id);
     if (prov) Object.assign(prov, body ?? {});
     return { provider: prov } as T;
   }
@@ -994,13 +1072,7 @@ export function handleMock<T>(
     Object.assign(appSettings, (body ?? {}) as Record<string, unknown>);
     return { ok: true, settings: appSettings } as T;
   }
-  m = match(path, "/admin/providers/:id/test");
-  if (method === "POST" && m) {
-    const prov = providers.find((p) => p.id === m!.id);
-    if (!prov) throw new Error("Provider introuvable");
-    const ok = Boolean(prov.encryptedApiKeyRef || prov.maskedKey);
-    return { ok, latencyMs: 120 + Math.floor(Math.random() * 240), checkedAt: now() } as T;
-  }
+
 
 
   // AUDIT
