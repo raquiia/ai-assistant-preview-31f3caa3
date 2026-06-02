@@ -123,29 +123,87 @@ function id(prefix: string) {
   return `${prefix}-${nextId}`;
 }
 
-function mockSources(): SourceCitation[] {
-  return [
-    {
-      chunkId: "ch-1",
-      documentId: "d-1",
-      title: "Guide WBS MIGSO-PCUBED",
-      page: 12,
-      section: "3.2 Découpage",
-      excerpt:
-        "Un découpage WBS efficace pour l'aéronautique s'appuie sur les jalons certifiants et les lots systèmes…",
-      score: 0.91,
-      sourceUri: "s3://kb/wbs-guide.pdf",
-    },
-    {
-      chunkId: "ch-2",
-      documentId: "d-2",
-      title: "Référentiel PMI – PMBOK 7",
-      section: "Principes",
-      excerpt: "Les principes de découpage hiérarchique restent applicables, en alignement avec les domaines de performance…",
-      score: 0.84,
-      sourceUri: "s3://kb/pmbok7.pdf",
-    },
-  ];
+const ALL_MOCK_SOURCES: SourceCitation[] = [
+  {
+    chunkId: "ch-1",
+    documentId: "d-1",
+    title: "Guide WBS MIGSO-PCUBED — Aéronautique",
+    page: 12,
+    section: "3.2 Découpage",
+    excerpt:
+      "Un découpage WBS efficace pour l'aéronautique s'appuie sur les jalons certifiants et les lots systèmes…",
+    score: 0.91,
+    sourceUri: "s3://kb/wbs-guide.pdf",
+    industryTags: ["aeronautique", "defense"],
+    pmDomainTags: ["planning/scheduling", "scope/requirements"],
+  },
+  {
+    chunkId: "ch-2",
+    documentId: "d-2",
+    title: "Référentiel PMI – PMBOK 7",
+    section: "Principes",
+    excerpt:
+      "Les principes de découpage hiérarchique restent applicables, en alignement avec les domaines de performance…",
+    score: 0.84,
+    sourceUri: "s3://kb/pmbok7.pdf",
+    industryTags: [],
+    pmDomainTags: [],
+  },
+  {
+    chunkId: "ch-3",
+    documentId: "d-4",
+    title: "Risk Management Pharma — Validation GxP",
+    page: 7,
+    section: "4. Mitigation",
+    excerpt:
+      "Les risques projet en pharma sont indissociables des contraintes GxP et de la traçabilité des changes…",
+    score: 0.78,
+    sourceUri: "s3://kb/risk-pharma.pdf",
+    industryTags: ["pharma"],
+    pmDomainTags: ["risk management", "change control", "quality"],
+  },
+  {
+    chunkId: "ch-4",
+    documentId: "d-5",
+    title: "Cost Control Nucléaire — EVM long cycle",
+    page: 24,
+    section: "EVM",
+    excerpt:
+      "Sur les programmes nucléaires, l'Earned Value sur des cycles longs nécessite une rebaseline annuelle structurée…",
+    score: 0.73,
+    sourceUri: "s3://kb/cost-nuke.pdf",
+    industryTags: ["nucleaire", "energie"],
+    pmDomainTags: ["cost control", "earned value", "reporting/KPI"],
+  },
+  {
+    chunkId: "ch-5",
+    documentId: "d-6",
+    title: "Outillage Agile IT — Jira & Smartsheet",
+    section: "Bonnes pratiques",
+    excerpt:
+      "Pour un programme IT, l'orchestration Jira ↔ Smartsheet permet de connecter delivery agile et planning portefeuille…",
+    score: 0.7,
+    sourceUri: "s3://kb/tools-it.md",
+    industryTags: ["IT/digital"],
+    pmDomainTags: ["agile/delivery", "tools P6/MS Project/Jira/Smartsheet"],
+  },
+];
+
+function filterSources(filters?: { industryTags?: string[]; pmDomainTags?: string[] }): SourceCitation[] {
+  const ind = filters?.industryTags ?? [];
+  const dom = filters?.pmDomainTags ?? [];
+  return ALL_MOCK_SOURCES.filter((s) => {
+    const sInd = s.industryTags ?? [];
+    const sDom = s.pmDomainTags ?? [];
+    // Documents génériques (sans tag) sont toujours candidats.
+    const indOk = ind.length === 0 || sInd.length === 0 || ind.some((t) => sInd.includes(t));
+    const domOk = dom.length === 0 || sDom.length === 0 || dom.some((t) => sDom.includes(t));
+    return indOk && domOk;
+  });
+}
+
+function mockSources(filters?: { industryTags?: string[]; pmDomainTags?: string[] }): SourceCitation[] {
+  return filterSources(filters);
 }
 
 const documents: DocumentRecord[] = [
