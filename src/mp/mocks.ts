@@ -305,6 +305,20 @@ export function handleMock<T>(
   body: unknown,
   session: Session | null,
 ): T {
+  // Normalise les chemins "modernes" du front vers les chemins du mock historique.
+  path = path
+    .replace(/^\/superadmin\/users/, "/admin/users")
+    .replace(/^\/superadmin\/ai-providers/, "/admin/providers")
+    .replace(/^\/superadmin\/prompts/, "/admin/prompts")
+    .replace(/^\/superadmin\/audit\/events/, "/admin/audit")
+    .replace(/^\/superadmin\/compliance\/system-card/, "/admin/compliance/system-card")
+    .replace(/^\/superadmin\/compliance\/export/, "/admin/compliance/export")
+    .replace(/^\/superadmin\/corrections/, "/admin/corrections")
+    .replace(/^\/admin\/kb\//, "/kb/")
+    .replace(/^\/managers\/active$/, "/users/managers")
+    .replace(/^\/auth\/first-visit\/manager$/, "/users/me/manager")
+    .replace(/^\/embed\/token$/, "/admin/embed");
+
   // AUTH
   if (method === "POST" && path === "/auth/login") {
     const email = (body as { email?: string })?.email ?? "";
@@ -312,6 +326,7 @@ export function handleMock<T>(
     if (!sess) throw new Error("Identifiants inconnus (mode mock)");
     return sess as T;
   }
+
 
   // CHAT
   if (method === "GET" && path === "/chat/conversations") {
