@@ -88,7 +88,7 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
       description="Gérez la base documentaire, contrôlez les revues et la vectorisation des sources."
       actions={
         <div className="flex flex-wrap gap-2">
-          <UploadPanel api={api} onUploaded={() => void refresh()} />
+          <UploadPanel api={api} session={session} onUploaded={() => void refresh()} />
           <Button variant="outline" size="sm" className="gap-2" onClick={() => void refresh()}>
             <RefreshCcw size={15} />
             Recharger
