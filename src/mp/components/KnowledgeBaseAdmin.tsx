@@ -166,26 +166,26 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
                 {
                   key: "tags",
                   header: "Tags",
-                  render: (row) => {
-                    const tags = [
-                      ...(row.industryTags ?? []).map((t) => ({ k: `i-${t}`, label: labelForIndustry(t), kind: "i" as const })),
-                      ...(row.pmDomainTags ?? []).map((t) => ({ k: `d-${t}`, label: labelForPmDomain(t), kind: "d" as const })),
-                    ];
-                    if (tags.length === 0) return <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">Générique</span>;
-                    return (
-                      <div className="flex flex-wrap gap-1">
-                        {tags.slice(0, 3).map((t) => (
-                          <span
-                            key={t.k}
-                            className={`rounded-full px-1.5 py-0.5 text-[9px] font-medium ${t.kind === "i" ? "border border-primary/20 bg-primary/5 text-primary" : "border border-muted-foreground/20 bg-muted/60 text-muted-foreground"}`}
-                          >
-                            {t.label}
-                          </span>
-                        ))}
-                        {tags.length > 3 && <span className="text-[10px] text-muted-foreground">+{tags.length - 3}</span>}
+                  render: (row) => (
+                    <div className="flex items-center gap-1.5">
+                      <div className="min-w-0 flex-1">
+                        <TagList
+                          industryTags={row.industryTags ?? []}
+                          pmDomainTags={row.pmDomainTags ?? []}
+                          max={3}
+                        />
                       </div>
-                    );
-                  },
+                      {session.user.role === "SUPER_ADMIN" && (
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <TagEditor
+                            industryTags={row.industryTags ?? []}
+                            pmDomainTags={row.pmDomainTags ?? []}
+                            onSave={(ind, dom) => updateTags(row.id, ind, dom)}
+                          />
+                        </span>
+                      )}
+                    </div>
+                  ),
                 },
                 {
                   key: "status",
