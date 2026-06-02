@@ -1,15 +1,90 @@
-import { Languages, MessageSquareText, MessageSquareWarning, Sparkles } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+  CheckCircle2,
+  Languages,
+  MessageSquareText,
+  Save,
+  Sparkles,
+  ThumbsDown,
+  ThumbsUp,
+  User2,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import type { ApiClient } from "../api";
 import type { HistoryRow } from "../types";
 import { AdminLayout } from "./AdminLayout";
 import { DataTable } from "./DataTable";
 import { EmptyState } from "./EmptyState";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { toast } from "sonner";
+
+interface ConsultantFeedback {
+  id: string;
+  userId: string;
+  userName: string;
+  rating: string;
+  comment?: string | null;
+  createdAt: string;
+}
+
+interface AdminComment {
+  id: string;
+  adminId: string;
+  adminName: string;
+  comment: string;
+  status: string;
+  createdAt: string;
+}
+
+interface HistorySource {
+  chunk: { title: string; section?: string; page?: number | null; text: string };
+  score: number;
+}
 
 interface HistoryDetail extends HistoryRow {
-  feedback: Array<{ id: string; userId: string; rating: string; comment?: string | null; createdAt: string }>;
-  adminComments: Array<{ id: string; adminId: string; comment: string; status: string; createdAt: string }>;
-  sources: Array<{ chunk: { title: string; section?: string; page?: number | null; text: string }; score: number }>;
+  feedback: ConsultantFeedback[];
+  adminComments: AdminComment[];
+  sources: HistorySource[];
+}
+
+const POSITIVE_RATINGS = new Set(["UP", "FOUR", "FIVE"]);
+const NEGATIVE_RATINGS = new Set(["DOWN", "ONE", "TWO"]);
+
+function ratingTone(rating: string): "positive" | "negative" | "neutral" {
+  if (POSITIVE_RATINGS.has(rating)) return "positive";
+  if (NEGATIVE_RATINGS.has(rating)) return "negative";
+  return "neutral";
+}
+
+function ratingLabel(rating: string) {
+  switch (rating) {
+    case "UP":
+      return "Pouce haut";
+    case "DOWN":
+      return "Pouce bas";
+    case "ONE":
+      return "1 / 5";
+    case "TWO":
+      return "2 / 5";
+    case "THREE":
+      return "3 / 5";
+    case "FOUR":
+      return "4 / 5";
+    case "FIVE":
+      return "5 / 5";
+    default:
+      return rating;
+  }
 }
 
 export function ManagerAdminHistory({ api }: { api: ApiClient }) {
@@ -17,144 +92,399 @@ export function ManagerAdminHistory({ api }: { api: ApiClient }) {
   const [selected, setSelected] = useState<HistoryDetail | null>(null);
   const [comment, setComment] = useState("");
   const [translation, setTranslation] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>("");
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"all" | "positive" | "negative" | "fallback">("all");
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
   useEffect(() => {
-    api.get<{ rows: HistoryRow[] }>("/admin/history").then((payload) => setRows(payload.rows)).catch(() => setRows([]));
+    api
+      .get<{ rows?: HistoryRow[] }>("/admin/history")
+      .then((payload) => setRows(payload?.rows ?? []))
+      .catch(() => setRows([]));
   }, [api]);
 
+  const filteredRows = useMemo(() => {
+    const lower = query.trim().toLowerCase();
+    return rows.filter((row) => {
+      if (lower) {
+        const haystack = `${row.userName} ${row.question} ${row.answer}`.toLowerCase();
+        if (!haystack.includes(lower)) return false;
+      }
+      if (filter === "fallback") return row.fallbackUsed;
+      return true;
+    });
+  }, [rows, query, filter]);
+
   async function selectRow(row: HistoryRow) {
-    const payload = await api.get<HistoryDetail>(`/admin/history/${row.responseId}`);
-    setSelected(payload);
-    setTranslation(null);
+    setLoadingDetail(true);
+    try {
+      const payload = await api.get<HistoryDetail>(`/admin/history/${row.responseId}`);
+      setSelected(payload);
+      setTranslation(null);
+      setComment("");
+    } catch {
+      toast.error("Impossible de charger le détail.");
+    } finally {
+      setLoadingDetail(false);
+    }
   }
 
   async function saveComment(state: "DRAFT" | "APPROVED") {
-    if (!selected || !comment.trim()) return;
-    await api.post(`/admin/history/${selected.responseId}/comment`, { comment, status: state });
-    setComment("");
-    setStatus(state === "APPROVED" ? "Correction approuvee et activee." : "Commentaire enregistre.");
-    await selectRow(selected);
+    if (!selected || !comment.trim()) {
+      toast.error("Écrivez un commentaire avant d'enregistrer.");
+      return;
+    }
+    try {
+      await api.post(`/admin/history/${selected.responseId}/comment`, {
+        comment,
+        status: state,
+      });
+      toast.success(
+        state === "APPROVED"
+          ? "Correction approuvée — elle sera prise en compte pour l'optimisation IA."
+          : "Brouillon enregistré.",
+      );
+      setComment("");
+      await selectRow(selected);
+    } catch {
+      toast.error("Sauvegarde impossible.");
+    }
   }
 
   async function translate(language: string) {
     if (!selected) return;
-    const payload = await api.post<{ question: string; answer: string }>(`/admin/history/${selected.responseId}/translate`, { language });
-    setTranslation(`${payload.question}\n\n${payload.answer}`);
+    try {
+      const payload = await api.post<{ question: string; answer: string }>(
+        `/admin/history/${selected.responseId}/translate`,
+        { language },
+      );
+      setTranslation(`${payload.question}\n\n${payload.answer}`);
+    } catch {
+      toast.error("Traduction indisponible.");
+    }
   }
 
   return (
-    <AdminLayout title="Historique Q/R et comportement IA">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+    <AdminLayout
+      title="Historique Q/R & feedback IA"
+      description="Auditez les questions des consultants, les réponses de l'IA, le feedback métier, et activez des corrections pour améliorer le modèle."
+    >
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <Input
+          placeholder="Rechercher par utilisateur, question ou réponse…"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          className="sm:max-w-md"
+        />
+        <Select value={filter} onValueChange={(value) => setFilter(value as typeof filter)}>
+          <SelectTrigger className="sm:w-56">
+            <SelectValue placeholder="Filtrer" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Toutes les réponses</SelectItem>
+            <SelectItem value="fallback">Avec fallback</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_440px]">
         <section className="min-w-0">
-          {rows.length ? (
+          {filteredRows.length ? (
             <DataTable
-              rows={rows}
+              rows={filteredRows}
               getKey={(row) => row.responseId}
               columns={[
-                { key: "createdAt", header: "Date", render: (row) => new Date(row.createdAt).toLocaleString() },
-                { key: "userName", header: "Utilisateur" },
+                {
+                  key: "createdAt",
+                  header: "Date",
+                  render: (row) => (
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(row.createdAt).toLocaleString()}
+                    </span>
+                  ),
+                },
+                {
+                  key: "userName",
+                  header: "Consultant",
+                  render: (row) => (
+                    <div className="flex items-center gap-2">
+                      <div className="grid size-7 place-items-center rounded-full bg-primary/10 text-primary">
+                        <User2 className="size-3.5" />
+                      </div>
+                      <span className="text-sm font-medium text-foreground">{row.userName}</span>
+                    </div>
+                  ),
+                },
                 {
                   key: "question",
                   header: "Question",
                   render: (row) => (
-                    <button className="max-w-full text-left font-medium text-mp-blue hover:underline" onClick={() => void selectRow(row)}>
+                    <button
+                      className="line-clamp-2 max-w-md text-left text-sm font-medium text-primary hover:underline"
+                      onClick={() => void selectRow(row)}
+                    >
                       {row.question}
                     </button>
-                  )
+                  ),
                 },
-                { key: "model", header: "Modele" },
-                { key: "confidence", header: "Confiance", render: (row) => `${row.confidence}/100` },
-                { key: "escalationTriggered", header: "Escalade", render: (row) => (row.escalationTriggered ? "Oui" : "Non") }
+                {
+                  key: "model",
+                  header: "Modèle",
+                  render: (row) => (
+                    <Badge variant="outline" className="rounded-full font-mono text-[11px]">
+                      {row.model}
+                    </Badge>
+                  ),
+                },
+                {
+                  key: "confidence",
+                  header: "Confiance",
+                  render: (row) => (
+                    <span className="text-sm tabular-nums text-foreground">
+                      {Math.round(row.confidence * 100)}%
+                    </span>
+                  ),
+                },
+                {
+                  key: "escalationTriggered",
+                  header: "Escalade",
+                  render: (row) =>
+                    row.escalationTriggered ? (
+                      <Badge variant="destructive" className="rounded-full">
+                        Oui
+                      </Badge>
+                    ) : row.fallbackUsed ? (
+                      <Badge variant="secondary" className="rounded-full">
+                        Fallback
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="rounded-full">
+                        Non
+                      </Badge>
+                    ),
+                },
               ]}
             />
           ) : (
             <EmptyState
-              title="Aucune question traçable"
-              description="L'historique apparaîtra après les premières conversations réelles des consultants."
+              title="Aucune question dans cette vue"
+              description="Ajustez vos filtres ou attendez les prochaines conversations consultants."
               icon={<MessageSquareText size={18} />}
             />
           )}
         </section>
 
-        <aside className="rounded-mp border border-slate-200 bg-white p-4 shadow-sm">
-          {status && <p className="mb-4 rounded-mp border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm text-slate-700">{status}</p>}
+        <aside className="rounded-2xl border border-border/70 bg-card p-5 shadow-sm">
           {selected ? (
-            <div className="space-y-4">
-              <div>
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
-                  <Sparkles size={16} className="text-mp-blue" />
-                  Détail de l'échange
-                </div>
-                <p className="mt-3 text-sm leading-6 text-slate-700">{selected.question}</p>
-                <p className="mt-3 rounded-mp bg-slate-50 p-3 text-sm leading-6 text-slate-700">{selected.answer}</p>
-              </div>
+            <ScrollArea className="h-[calc(100vh-280px)] pr-2">
+              <div className="space-y-5">
+                <header>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Sparkles size={14} className="text-primary" />
+                    Échange du {new Date(selected.createdAt).toLocaleString()}
+                  </div>
+                  <p className="mt-3 text-sm font-semibold leading-6 text-foreground">
+                    {selected.question}
+                  </p>
+                  <p className="mt-3 rounded-xl bg-muted/60 p-3 text-sm leading-6 text-foreground">
+                    {selected.answer}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                    <Badge variant="outline" className="rounded-full">
+                      {selected.provider} · {selected.model}
+                    </Badge>
+                    <Badge variant="outline" className="rounded-full">
+                      Confiance {Math.round(selected.confidence * 100)}%
+                    </Badge>
+                    <Badge variant="outline" className="rounded-full">
+                      {selected.latencyMs} ms
+                    </Badge>
+                    {selected.fallbackUsed && (
+                      <Badge variant="secondary" className="rounded-full">
+                        Fallback utilisé
+                      </Badge>
+                    )}
+                  </div>
+                </header>
 
-              <div className="rounded-mp border border-slate-200 bg-slate-50 p-4">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Commentaires admin</p>
-                {selected.adminComments.length ? (
-                  <div className="space-y-2">
-                    {selected.adminComments.map((item) => (
-                      <div key={item.id} className="rounded-mp bg-white p-3 text-sm text-slate-700 shadow-sm">
-                        <div className="mb-1 flex items-center justify-between gap-2 text-xs text-slate-500">
-                          <span>{item.status}</span>
-                          <span>{new Date(item.createdAt).toLocaleString()}</span>
+                {/* Feedback consultant */}
+                <section className="rounded-xl border border-border/70 bg-background p-4">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Feedback du consultant
+                  </p>
+                  {selected.feedback.length ? (
+                    <div className="space-y-3">
+                      {selected.feedback.map((fb) => {
+                        const tone = ratingTone(fb.rating);
+                        return (
+                          <div
+                            key={fb.id}
+                            className="rounded-lg border border-border/60 bg-card p-3 text-sm"
+                          >
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <Badge
+                                  variant={
+                                    tone === "positive"
+                                      ? "default"
+                                      : tone === "negative"
+                                        ? "destructive"
+                                        : "secondary"
+                                  }
+                                  className="gap-1 rounded-full"
+                                >
+                                  {tone === "positive" ? (
+                                    <ThumbsUp className="size-3" />
+                                  ) : tone === "negative" ? (
+                                    <ThumbsDown className="size-3" />
+                                  ) : null}
+                                  {ratingLabel(fb.rating)}
+                                </Badge>
+                                <span className="text-xs font-medium text-foreground">
+                                  {fb.userName}
+                                </span>
+                              </div>
+                              <span className="text-[11px] text-muted-foreground">
+                                {new Date(fb.createdAt).toLocaleDateString()}
+                              </span>
+                            </div>
+                            {fb.comment && (
+                              <p className="text-sm leading-6 text-muted-foreground">
+                                {fb.comment}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Le consultant n'a pas encore donné de feedback sur cette réponse.
+                    </p>
+                  )}
+                </section>
+
+                {/* Feedback admin pour améliorer l'IA */}
+                <section className="rounded-xl border border-primary/30 bg-primary/5 p-4">
+                  <div className="mb-3 flex items-start gap-2">
+                    <CheckCircle2 className="mt-0.5 size-4 text-primary" />
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">
+                        Optimisation IA — feedback admin
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Approuvez une correction pour qu'elle soit injectée dans le prochain cycle
+                        de fine-tuning / RAG.
+                      </p>
+                    </div>
+                  </div>
+
+                  {selected.adminComments.length > 0 && (
+                    <div className="mb-3 space-y-2">
+                      {selected.adminComments.map((item) => (
+                        <div
+                          key={item.id}
+                          className="rounded-lg border border-border/60 bg-card p-3 text-sm"
+                        >
+                          <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
+                            <Badge
+                              variant={item.status === "APPROVED" ? "default" : "secondary"}
+                              className="rounded-full"
+                            >
+                              {item.status === "APPROVED" ? "Approuvée" : "Brouillon"}
+                            </Badge>
+                            <span>
+                              {item.adminName} · {new Date(item.createdAt).toLocaleString()}
+                            </span>
+                          </div>
+                          <p className="leading-6 text-foreground">{item.comment}</p>
                         </div>
-                        <p className="mp-text-wrap leading-6">{item.comment}</p>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                  )}
+
+                  <Textarea
+                    className="min-h-24"
+                    value={comment}
+                    onChange={(event) => setComment(event.target.value)}
+                    placeholder="Ex. la réponse devrait citer le PMBOK 7 §3.2 et préciser le contexte aéronautique…"
+                  />
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => void saveComment("DRAFT")}
+                    >
+                      <Save className="size-3.5" />
+                      Brouillon
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => void saveComment("APPROVED")}
+                    >
+                      <CheckCircle2 className="size-3.5" />
+                      Approuver pour l'IA
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => void translate("en")}
+                    >
+                      <Languages className="size-3.5" />
+                      Traduire EN
+                    </Button>
                   </div>
-                ) : (
-                  <p className="text-sm text-slate-500">Aucun commentaire pour le moment.</p>
+                </section>
+
+                {/* Sources */}
+                <section className="rounded-xl border border-border/70 bg-background p-4">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Sources utilisées
+                  </p>
+                  {selected.sources.length ? (
+                    <div className="space-y-2">
+                      {selected.sources.map((source, idx) => (
+                        <div
+                          key={`${source.chunk.title}-${idx}`}
+                          className="rounded-lg border border-border/60 bg-card p-3 text-sm"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-medium text-foreground">{source.chunk.title}</p>
+                            <Badge variant="outline" className="rounded-full text-[11px]">
+                              {source.score}%
+                            </Badge>
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {source.chunk.section ?? "Section interne"}
+                            {source.chunk.page ? ` · p.${source.chunk.page}` : ""}
+                          </p>
+                          <p className="mt-2 leading-6 text-muted-foreground">
+                            {source.chunk.text}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Aucune source rattachée à cette réponse.
+                    </p>
+                  )}
+                </section>
+
+                {translation && (
+                  <pre className="whitespace-pre-wrap rounded-xl bg-foreground p-3 text-xs leading-5 text-background">
+                    {translation}
+                  </pre>
                 )}
               </div>
-
-              <textarea
-                className="min-h-28 w-full rounded-mp border border-slate-200 p-3 text-sm outline-none focus:border-mp-cyan"
-                value={comment}
-                onChange={(event) => setComment(event.target.value)}
-                placeholder="Commentaire admin pour corriger le comportement"
-              />
-              <div className="flex flex-wrap gap-2">
-                <button className="flex h-10 items-center gap-2 rounded-mp border border-slate-200 px-3 text-sm hover:bg-slate-50" onClick={() => void saveComment("DRAFT")}>
-                  <MessageSquareWarning size={15} />
-                  Enregistrer brouillon
-                </button>
-                <button className="flex h-10 items-center gap-2 rounded-mp bg-mp-blue px-3 text-sm font-semibold text-white" onClick={() => void saveComment("APPROVED")}>
-                  <Sparkles size={15} />
-                  Approuver et activer
-                </button>
-                <button className="flex h-10 items-center gap-2 rounded-mp border border-slate-200 px-3 text-sm hover:bg-slate-50" onClick={() => void translate("en")}>
-                  <Languages size={15} />
-                  Traduire EN
-                </button>
-              </div>
-
-              <div className="rounded-mp border border-slate-200 bg-white p-4">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Sources utilisees</p>
-                {selected.sources.length ? (
-                  <div className="space-y-2">
-                    {selected.sources.map((source) => (
-                      <div key={`${source.chunk.title}-${source.score}`} className="rounded-mp bg-slate-50 p-3 text-sm">
-                        <p className="font-medium text-slate-950">{source.chunk.title}</p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {source.chunk.section ?? "Section interne"} · {source.score}/100
-                        </p>
-                        <p className="mt-2 mp-text-wrap leading-6 text-slate-700">{source.chunk.text}</p>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-slate-500">Aucune source rattachee à cette réponse.</p>
-                )}
-              </div>
-
-              {translation && <pre className="whitespace-pre-wrap rounded-mp bg-slate-950 p-3 text-xs leading-5 text-white">{translation}</pre>}
-            </div>
+            </ScrollArea>
           ) : (
             <EmptyState
-              title="Selectionnez une ligne"
-              description="Le panneau de droite affiche le détail, les sources, les commentaires et la traduction."
+              title={loadingDetail ? "Chargement…" : "Sélectionnez une ligne"}
+              description="Le panneau affiche le détail de l'échange, le feedback consultant, les sources, et permet d'approuver une correction pour l'IA."
               icon={<MessageSquareText size={18} />}
             />
           )}
