@@ -625,7 +625,12 @@ export function handleMock<T>(
   }
   m = match(path, "/chat/conversations/:id/messages");
   if (method === "POST" && m) {
-    const content = (body as { content?: string })?.content ?? "";
+    const payload = (body as { content?: string; industryTags?: string[]; pmDomainTags?: string[] }) ?? {};
+    const content = payload.content ?? "";
+    const filters = {
+      industryTags: Array.isArray(payload.industryTags) ? payload.industryTags : [],
+      pmDomainTags: Array.isArray(payload.pmDomainTags) ? payload.pmDomainTags : [],
+    };
     const list = (messagesByConv[m.id] ??= []);
     list.push({
       id: id("m"),
@@ -635,7 +640,7 @@ export function handleMock<T>(
       language: "fr",
       createdAt: now(),
     });
-    const answer = buildAnswer(content);
+    const answer = buildAnswer(content, filters);
     list.push({
       id: answer.response.messageId,
       conversationId: m.id,
