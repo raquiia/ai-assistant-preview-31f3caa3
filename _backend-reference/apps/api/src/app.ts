@@ -26,6 +26,7 @@ import { AiProviderService, type AiProviderName } from "./services/aiProviderSer
 import { jitProvisionUser, type JitRepo } from "./services/jitProvisioning.js";
 import { CognitoAdminProvider } from "./providers/aws/cognito-admin.js";
 import { CognitoAuthProvider, type AppRole } from "./providers/aws/cognito-auth.js";
+import { createAuth, createOptionalAuth, requireRole } from "./security/authMiddleware.js";
 
 declare module "fastify" {
   interface FastifyRequest {
