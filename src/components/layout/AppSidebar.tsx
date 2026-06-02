@@ -168,6 +168,7 @@ export function AppSidebar({ view, onChangeView }: { view: ViewKey; onChangeView
                 {adminItems.map((item) => {
                   const Icon = item.icon;
                   const active = view === item.key;
+                  const count = badgeFor(item);
                   return (
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
@@ -177,11 +178,20 @@ export function AppSidebar({ view, onChangeView }: { view: ViewKey; onChangeView
                         className="data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:font-semibold"
                       >
                         <Icon className="size-4" />
-                        <span>{item.label}</span>
+                        <span className="flex-1">{item.label}</span>
+                        {count > 0 && !collapsed && (
+                          <Badge className="ml-auto h-5 min-w-5 justify-center bg-destructive px-1.5 text-[10px] text-destructive-foreground">
+                            {count}
+                          </Badge>
+                        )}
+                        {count > 0 && collapsed && (
+                          <span className="absolute right-1 top-1 size-2 rounded-full bg-destructive" />
+                        )}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
                 })}
+
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
