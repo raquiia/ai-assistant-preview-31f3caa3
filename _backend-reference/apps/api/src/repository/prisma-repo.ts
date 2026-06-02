@@ -64,4 +64,42 @@ export class PrismaAppRepository extends AppRepository {
   async close(): Promise<void> {
     await this.prisma.$disconnect();
   }
+
+  // ─── Async ingestion helpers (Textract / Transcribe callbacks) ────────────
+
+  /** Mark a Document as awaiting async extraction. */
+  async markDocumentProcessing(
+    documentId: string,
+    externalJobId: string,
+    engine: "textract" | "transcribe"
+  ): Promise<void> {
+    await this.prisma.document.update({
+      where: { id: documentId },
+      data: { status: "PROCESSING", externalJobId, extractionEngine: engine },
+    });
+  }
+
+  /** Look up the original ingestion job by the externalJobId stored when we kicked it off. */
+  async findDocumentByExternalJobId(externalJobId: string) {
+    return this.prisma.document.findUnique({ where: { externalJobId } });
+  }
+
+  /** Persist the final outcome of an async extraction. */
+  async updateDocumentExtraction(
+    documentId: string,
+    patch: {
+      status: "PUBLISHED" | "NEEDS_REVIEW" | "ERROR";
+      confidence?: number;
+      warnings?: string[];
+    }
+  ): Promise<void> {
+    await this.prisma.document.update({
+      where: { id: documentId },
+      data: {
+        status: patch.status,
+        extractionConfidence: patch.confidence,
+        extractionWarnings: patch.warnings ?? [],
+      },
+    });
+  }
 }

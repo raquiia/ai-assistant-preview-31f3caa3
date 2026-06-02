@@ -46,6 +46,15 @@ export interface IngestionDeps {
   vector?: OpenSearchVectorProvider;
   textract?: TextractProvider;
   transcribe?: TranscribeProvider;
+  /**
+   * Persist the PROCESSING handoff so the callback worker can find the
+   * Document again via externalJobId. No-op for in-memory tests.
+   */
+  markProcessing?: (
+    documentId: string,
+    externalJobId: string,
+    engine: "textract" | "transcribe"
+  ) => Promise<void>;
 }
 
 export type IngestionStatus = "PUBLISHED" | "NEEDS_REVIEW" | "PROCESSING";
@@ -66,6 +75,11 @@ export async function runIngestion(job: IngestionJob, deps: IngestionDeps = {}):
   const sync = await extractSync(job, deps);
   if (sync.async) {
     const document = baseDocument(job, "", "PROCESSING");
+    if (deps.markProcessing && sync.externalJobId) {
+      await deps
+        .markProcessing(job.documentId, sync.externalJobId, sync.engine ?? "textract")
+        .catch((err) => console.error("[ingestion] markProcessing failed:", err));
+    }
     return { document, chunks: [], status: "PROCESSING", warnings, externalJobId: sync.externalJobId };
   }
 
@@ -122,6 +136,7 @@ interface SyncExtractionResult {
   text?: string;
   async?: boolean;
   externalJobId?: string;
+  engine?: "textract" | "transcribe";
 }
 
 async function extractSync(job: IngestionJob, deps: IngestionDeps): Promise<SyncExtractionResult> {
@@ -150,7 +165,7 @@ async function extractSync(job: IngestionJob, deps: IngestionDeps): Promise<Sync
     if (deps.textract && deps.storage) {
       const bucket = process.env.S3_KNOWLEDGE_BUCKET!;
       const { jobId } = await deps.textract.startJob(bucket, job.objectKey, job.documentId);
-      return { async: true, externalJobId: jobId };
+      return { async: true, externalJobId: jobId, engine: "textract" };
     }
     return { text: "" };
   }
@@ -183,7 +198,7 @@ async function extractSync(job: IngestionJob, deps: IngestionDeps): Promise<Sync
     if (!deps.textract || !deps.storage) return { text: "" };
     const bucket = process.env.S3_KNOWLEDGE_BUCKET!;
     const { jobId } = await deps.textract.startJob(bucket, job.objectKey, job.documentId);
-    return { async: true, externalJobId: jobId };
+    return { async: true, externalJobId: jobId, engine: "textract" };
   }
 
   // Audio/Video → Transcribe
@@ -197,7 +212,7 @@ async function extractSync(job: IngestionJob, deps: IngestionDeps): Promise<Sync
       jobName,
       mediaFormat: inferMediaFormat(job.mimeType),
     });
-    return { async: true, externalJobId: jobName };
+    return { async: true, externalJobId: jobName, engine: "transcribe" };
   }
 
   return { text: "" };
