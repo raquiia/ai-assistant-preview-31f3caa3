@@ -39,9 +39,10 @@ export function UserManagement({ api }: { api: ApiClient }) {
   const [role, setRole] = useState<User["role"]>("CONSULTANT");
 
   async function refresh() {
-    const payload = await api.get<{ users: User[] }>("/superadmin/users");
-    setUsers(payload.users);
+    const payload = await api.get<{ users?: User[] }>("/superadmin/users");
+    setUsers(payload?.users ?? []);
   }
+
 
   useEffect(() => {
     refresh().catch(() => setUsers([]));

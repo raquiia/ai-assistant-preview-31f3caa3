@@ -305,6 +305,20 @@ export function handleMock<T>(
   body: unknown,
   session: Session | null,
 ): T {
+  // Normalise les chemins "modernes" du front vers les chemins du mock historique.
+  path = path
+    .replace(/^\/superadmin\/users/, "/admin/users")
+    .replace(/^\/superadmin\/ai-providers/, "/admin/providers")
+    .replace(/^\/superadmin\/prompts/, "/admin/prompts")
+    .replace(/^\/superadmin\/audit\/events/, "/admin/audit")
+    .replace(/^\/superadmin\/compliance\/system-card/, "/admin/compliance/system-card")
+    .replace(/^\/superadmin\/compliance\/export/, "/admin/compliance/export")
+    .replace(/^\/superadmin\/corrections/, "/admin/corrections")
+    .replace(/^\/admin\/kb\//, "/kb/")
+    .replace(/^\/managers\/active$/, "/users/managers")
+    .replace(/^\/auth\/first-visit\/manager$/, "/users/me/manager")
+    .replace(/^\/embed\/token$/, "/admin/embed");
+
   // AUTH
   if (method === "POST" && path === "/auth/login") {
     const email = (body as { email?: string })?.email ?? "";
@@ -312,6 +326,7 @@ export function handleMock<T>(
     if (!sess) throw new Error("Identifiants inconnus (mode mock)");
     return sess as T;
   }
+
 
   // CHAT
   if (method === "GET" && path === "/chat/conversations") {
@@ -535,6 +550,101 @@ export function handleMock<T>(
     } as T;
   }
 
+  // KB — détail, publication, réindexation, upload
+  m = match(path, "/kb/documents/:id");
+  if (method === "GET" && m) {
+    const doc = documents.find((d) => d.id === m!.id) ?? documents[0]!;
+    return {
+      document: doc,
+      chunks: [
+        {
+          id: "ch-1",
+          title: doc.title,
+          text: "Extrait simulé pour la prévisualisation UI. Brancher l'API réelle pour les contenus exacts.",
+          page: 1,
+          section: "Intro",
+          paragraph: 1,
+        },
+      ],
+    } as T;
+  }
+  m = match(path, "/kb/documents/:id/publish");
+  if (method === "POST" && m) {
+    const doc = documents.find((d) => d.id === m!.id);
+    if (doc) doc.status = "PUBLISHED";
+    return { ok: true } as T;
+  }
+  m = match(path, "/kb/documents/:id/reindex");
+  if (method === "POST" && m) {
+    return { ok: true } as T;
+  }
+  if (method === "POST" && path === "/kb/upload") {
+    const title =
+      body instanceof FormData
+        ? String(body.get("title") ?? "Document")
+        : ((body as { title?: string })?.title ?? "Document");
+    const doc: DocumentRecord = {
+      id: id("d"),
+      title,
+      ownerId: session?.user.id ?? "u-mgr",
+      objectKey: `kb/${title}`,
+      mimeType: "application/octet-stream",
+      status: "NEEDS_REVIEW",
+      version: 1,
+      checksum: "mock",
+      language: "fr",
+      createdAt: now(),
+    };
+    documents.unshift(doc);
+    return { document: doc } as T;
+  }
+
+  // PROMPTS — rollback
+  m = match(path, "/admin/prompts/:id/rollback");
+  if (method === "POST" && m) {
+    prompts.forEach((p) => {
+      p.active = p.id === m!.id;
+    });
+    return { ok: true } as T;
+  }
+
+  // COMPLIANCE / CORRECTIONS
+  if (method === "GET" && path === "/admin/compliance/system-card") {
+    return {
+      systemCard: {
+        version: "1.0.0",
+        updatedAt: now(),
+        model: "mistral-large-latest",
+        provider: "mistral",
+        purpose:
+          "Assistant interne MIGSO-PCUBED dédié à la production de livrables PMO sur base de la knowledge base validée.",
+        dataSources: ["KB interne", "Référentiels PMI", "Notes validées superadmin"],
+        risks: ["Hallucination", "Citations imprécises", "Drift modèle"],
+        mitigations: ["RAG strict", "Citations forcées", "Revue humaine"],
+        owners: ["Gouvernance IA", "Direction Conformité"],
+      },
+    } as T;
+  }
+  if (method === "GET" && path === "/admin/compliance/export") {
+    return { url: "data:text/plain;base64,TUlHU08tUENVQkVE", expiresIn: 3600 } as T;
+  }
+  if (method === "GET" && path === "/admin/corrections") {
+    return { corrections: [] } as T;
+  }
+
+  // SOURCE
+  m = match(path, "/source/:chunkId");
+  if (method === "GET" && m) {
+    return {
+      chunk: {
+        id: m.chunkId,
+        title: "Source simulée",
+        text: "Aperçu du contenu de la source pour la prévisualisation UI.",
+      },
+    } as T;
+  }
+
   // Fallback no-op
   return {} as T;
 }
+
