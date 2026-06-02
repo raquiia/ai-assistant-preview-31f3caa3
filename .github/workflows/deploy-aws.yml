@@ -1,0 +1,379 @@
+name: Deploy AWS Backend
+
+# Pipeline complet :
+#   1. terraform apply (infra)
+#   2. build + push Docker images (api / web / worker) sur ECR
+#   3. terraform apply (rollout ECS avec les nouveaux tags)
+#   4. prisma migrate deploy via ECS run-task
+#
+# Déclencheurs :
+#   - push sur main (déploiement automatique du backend)
+#   - workflow_dispatch (déclenchement manuel, optionnellement destroy)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "_backend-reference/**"
+      - ".github/workflows/deploy-aws.yml"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action à exécuter"
+        required: true
+        default: "deploy"
+        type: choice
+        options:
+          - deploy
+          - plan
+          - destroy
+      skip_migrate:
+        description: "Sauter prisma migrate deploy"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: aws-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-3' }}
+  TF_VERSION: "1.9.8"
+  WORKDIR: _backend-reference
+
+permissions:
+  id-token: write   # OIDC -> AWS
+  contents: read
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Job 1 — Terraform pass 1 (infra de base)
+  # ─────────────────────────────────────────────────────────────
+  terraform-infra:
+    name: Terraform apply (infra)
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action != 'destroy'
+    outputs:
+      ecr_api: ${{ steps.tf-out.outputs.ecr_api }}
+      ecr_web: ${{ steps.tf-out.outputs.ecr_web }}
+      ecr_worker: ${{ steps.tf-out.outputs.ecr_worker }}
+      cluster: ${{ steps.tf-out.outputs.cluster }}
+      db_secret_arn: ${{ steps.tf-out.outputs.db_secret_arn }}
+      execution_role_arn: ${{ steps.tf-out.outputs.execution_role_arn }}
+      alb_url: ${{ steps.tf-out.outputs.alb_url }}
+      account_id: ${{ steps.aws.outputs.account-id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        id: aws
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Materialize terraform.tfvars
+        working-directory: ${{ env.WORKDIR }}/infra/aws
+        run: |
+          if [[ -n "${{ secrets.TERRAFORM_TFVARS }}" ]]; then
+            echo "${{ secrets.TERRAFORM_TFVARS }}" > terraform.tfvars
+          else
+            cp terraform.tfvars.example terraform.tfvars
+          fi
+
+      - name: Terraform init
+        working-directory: ${{ env.WORKDIR }}/infra/aws
+        run: terraform init -upgrade
+
+      - name: Terraform plan
+        if: github.event.inputs.action == 'plan'
+        working-directory: ${{ env.WORKDIR }}/infra/aws
+        run: terraform plan
+
+      - name: Terraform apply (pass 1 — :latest tags)
+        if: github.event.inputs.action != 'plan'
+        working-directory: ${{ env.WORKDIR }}/infra/aws
+        run: terraform apply -auto-approve
+
+      - name: Export outputs
+        id: tf-out
+        if: github.event.inputs.action != 'plan'
+        working-directory: ${{ env.WORKDIR }}/infra/aws
+        run: |
+          echo "ecr_api=$(terraform output -json ecr_repository_urls | jq -r '.api')" >> $GITHUB_OUTPUT
+          echo "ecr_web=$(terraform output -json ecr_repository_urls | jq -r '.web')" >> $GITHUB_OUTPUT
+          echo "ecr_worker=$(terraform output -json ecr_repository_urls | jq -r '.worker')" >> $GITHUB_OUTPUT
+          echo "cluster=$(terraform output -raw ecs_cluster_name)" >> $GITHUB_OUTPUT
+          echo "db_secret_arn=$(terraform output -raw database_url_secret_arn)" >> $GITHUB_OUTPUT
+          echo "alb_url=$(terraform output -raw alb_url)" >> $GITHUB_OUTPUT
+          ROLE_NAME="$(terraform output -raw ecs_cluster_name)-ecs-execution"
+          echo "execution_role_arn=$(aws iam get-role --role-name "$ROLE_NAME" --query 'Role.Arn' --output text)" >> $GITHUB_OUTPUT
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 2 — Build & push Docker images (api / web / worker) en parallèle
+  # ─────────────────────────────────────────────────────────────
+  build-and-push:
+    name: Build & push ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: terraform-infra
+    if: github.event.inputs.action != 'plan' && github.event.inputs.action != 'destroy'
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - service: api
+            dockerfile: _backend-reference/apps/api/Dockerfile
+            repo_output: ecr_api
+          - service: web
+            dockerfile: _backend-reference/apps/web/Dockerfile
+            repo_output: ecr_web
+          - service: worker
+            dockerfile: _backend-reference/apps/worker/Dockerfile
+            repo_output: ecr_worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve ECR repo
+        id: repo
+        run: |
+          case "${{ matrix.repo_output }}" in
+            ecr_api)    echo "url=${{ needs.terraform-infra.outputs.ecr_api }}" >> $GITHUB_OUTPUT ;;
+            ecr_web)    echo "url=${{ needs.terraform-infra.outputs.ecr_web }}" >> $GITHUB_OUTPUT ;;
+            ecr_worker) echo "url=${{ needs.terraform-infra.outputs.ecr_worker }}" >> $GITHUB_OUTPUT ;;
+          esac
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.WORKDIR }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.repo.outputs.url }}:${{ github.sha }}
+            ${{ steps.repo.outputs.url }}:latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 3 — Terraform pass 2 (rollout ECS avec les nouveaux tags)
+  # ─────────────────────────────────────────────────────────────
+  terraform-rollout:
+    name: Terraform apply (rollout)
+    runs-on: ubuntu-latest
+    needs: [terraform-infra, build-and-push]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Materialize terraform.tfvars
+        working-directory: ${{ env.WORKDIR }}/infra/aws
+        run: |
+          if [[ -n "${{ secrets.TERRAFORM_TFVARS }}" ]]; then
+            echo "${{ secrets.TERRAFORM_TFVARS }}" > terraform.tfvars
+          else
+            cp terraform.tfvars.example terraform.tfvars
+          fi
+
+      - name: Terraform init
+        working-directory: ${{ env.WORKDIR }}/infra/aws
+        run: terraform init -upgrade
+
+      - name: Terraform apply (pass 2 — image tags = ${{ github.sha }})
+        working-directory: ${{ env.WORKDIR }}/infra/aws
+        run: |
+          terraform apply -auto-approve \
+            -var "api_image_tag=${{ github.sha }}" \
+            -var "web_image_tag=${{ github.sha }}" \
+            -var "worker_image_tag=${{ github.sha }}"
+
+      - name: Force ECS new deployment
+        run: |
+          for svc in api web worker; do
+            aws ecs update-service \
+              --cluster ${{ needs.terraform-infra.outputs.cluster }} \
+              --service "$svc" \
+              --force-new-deployment >/dev/null
+          done
+
+      - name: Wait for services to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ needs.terraform-infra.outputs.cluster }} \
+            --services api web worker
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 4 — Prisma migrate deploy via ECS run-task
+  # ─────────────────────────────────────────────────────────────
+  prisma-migrate:
+    name: Prisma migrate deploy
+    runs-on: ubuntu-latest
+    needs: [terraform-infra, terraform-rollout]
+    if: github.event.inputs.skip_migrate != 'true'
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve network configuration
+        id: net
+        run: |
+          SUBNETS=$(aws ec2 describe-subnets \
+            --filters "Name=tag:Tier,Values=private" \
+            --query 'Subnets[*].SubnetId' --output text | tr '\t' ',')
+          SG=$(aws ec2 describe-security-groups \
+            --filters "Name=group-name,Values=*ecs-api" \
+            --query 'SecurityGroups[0].GroupId' --output text)
+          echo "subnets=$SUBNETS" >> $GITHUB_OUTPUT
+          echo "sg=$SG" >> $GITHUB_OUTPUT
+
+      - name: Register migrate task definition
+        id: taskdef
+        env:
+          IMAGE: ${{ needs.terraform-infra.outputs.ecr_api }}:${{ github.sha }}
+          DB_SECRET: ${{ needs.terraform-infra.outputs.db_secret_arn }}
+          EXEC_ROLE: ${{ needs.terraform-infra.outputs.execution_role_arn }}
+        run: |
+          CONTAINER_DEFS=$(jq -n \
+            --arg img "$IMAGE" \
+            --arg sec "$DB_SECRET" \
+            --arg region "$AWS_REGION" \
+            '[{
+              name:"migrate",
+              image:$img,
+              essential:true,
+              command:["npx","prisma","migrate","deploy","--schema","prisma/schema.prisma"],
+              secrets:[{name:"DATABASE_URL",valueFrom:$sec}],
+              logConfiguration:{
+                logDriver:"awslogs",
+                options:{
+                  "awslogs-group":"/ecs/migrate",
+                  "awslogs-region":$region,
+                  "awslogs-stream-prefix":"migrate",
+                  "awslogs-create-group":"true"
+                }
+              }
+            }]')
+
+          ARN=$(aws ecs register-task-definition \
+            --family migrate \
+            --requires-compatibilities FARGATE \
+            --network-mode awsvpc \
+            --cpu 512 --memory 1024 \
+            --execution-role-arn "$EXEC_ROLE" \
+            --container-definitions "$CONTAINER_DEFS" \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "arn=$ARN" >> $GITHUB_OUTPUT
+
+      - name: Run migrate task & wait
+        run: |
+          TASK_ARN=$(aws ecs run-task \
+            --cluster ${{ needs.terraform-infra.outputs.cluster }} \
+            --launch-type FARGATE \
+            --task-definition ${{ steps.taskdef.outputs.arn }} \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ steps.net.outputs.subnets }}],securityGroups=[${{ steps.net.outputs.sg }}],assignPublicIp=DISABLED}" \
+            --query 'tasks[0].taskArn' --output text)
+          echo "Migrate task: $TASK_ARN"
+
+          aws ecs wait tasks-stopped \
+            --cluster ${{ needs.terraform-infra.outputs.cluster }} \
+            --tasks "$TASK_ARN"
+
+          EXIT=$(aws ecs describe-tasks \
+            --cluster ${{ needs.terraform-infra.outputs.cluster }} \
+            --tasks "$TASK_ARN" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          echo "Migrate exit code: $EXIT"
+          if [[ "$EXIT" != "0" ]]; then
+            echo "::error::Prisma migrate failed — voir CloudWatch /ecs/migrate"
+            exit 1
+          fi
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 5 — Récapitulatif
+  # ─────────────────────────────────────────────────────────────
+  summary:
+    name: Deployment summary
+    runs-on: ubuntu-latest
+    needs: [terraform-infra, terraform-rollout, prisma-migrate]
+    if: always() && github.event.inputs.action != 'destroy' && github.event.inputs.action != 'plan'
+    steps:
+      - name: Print summary
+        run: |
+          echo "## ✅ Déploiement AWS terminé" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Champ | Valeur |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| ALB URL | ${{ needs.terraform-infra.outputs.alb_url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cluster ECS | ${{ needs.terraform-infra.outputs.cluster }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image tag | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Région | ${{ env.AWS_REGION }} |" >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────────────────────────
+  # Job destroy — déclenché manuellement uniquement
+  # ─────────────────────────────────────────────────────────────
+  destroy:
+    name: Terraform destroy
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'destroy'
+    environment: production-destroy   # protection : nécessite approbation manuelle
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Materialize terraform.tfvars
+        working-directory: ${{ env.WORKDIR }}/infra/aws
+        run: |
+          if [[ -n "${{ secrets.TERRAFORM_TFVARS }}" ]]; then
+            echo "${{ secrets.TERRAFORM_TFVARS }}" > terraform.tfvars
+          else
+            cp terraform.tfvars.example terraform.tfvars
+          fi
+
+      - name: Terraform init
+        working-directory: ${{ env.WORKDIR }}/infra/aws
+        run: terraform init -upgrade
+
+      - name: Terraform destroy
+        working-directory: ${{ env.WORKDIR }}/infra/aws
+        run: terraform destroy -auto-approve
