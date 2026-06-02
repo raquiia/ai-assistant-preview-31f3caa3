@@ -1,7 +1,7 @@
-import { FileText, RefreshCcw, ShieldCheck, UploadCloud } from "lucide-react";
+import { FileText, Pencil, RefreshCcw, ShieldCheck, Tag, UploadCloud } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { DocumentRecord } from "../shared";
-import { labelForIndustry, labelForPmDomain } from "../shared";
+import { INDUSTRIES, PM_DOMAINS, labelForIndustry, labelForPmDomain } from "../shared";
 import type { ApiClient } from "../api";
 import type { Session } from "../types";
 import { AdminLayout } from "./AdminLayout";
@@ -11,6 +11,9 @@ import { UploadPanel } from "./UploadPanel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 
 interface DocumentDetail {
