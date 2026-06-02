@@ -770,6 +770,54 @@ export async function buildApp() {
     return { provider: { ...config, encryptedApiKeyRef: config.encryptedApiKeyRef ? "stored" : null } };
   });
 
+  // Test connectivity / validity of a stored provider API key.
+  // Returns latency, currently reachable status, and a timestamp.
+  app.post("/superadmin/ai-providers/:id/test", { preHandler: auth(repo) }, async (request, reply) => {
+    if (!canManageUsers(request.actor!)) return reply.code(403).send({ error: "Access denied" });
+    const { id } = request.params as { id: string };
+    const config = repo.state.providerConfigs.find((item) => item.id === id);
+    if (!config) return reply.code(404).send({ error: "Provider config not found" });
+
+    const startedAt = Date.now();
+    let ok = false;
+    let message: string | null = null;
+    try {
+      const apiKey = config.encryptedApiKeyRef ? await secrets.readSecret(config.encryptedApiKeyRef) : null;
+      if (!apiKey) {
+        message = "No API key configured";
+      } else if (config.provider === "openai") {
+        const res = await fetch("https://api.openai.com/v1/models", {
+          headers: { Authorization: `Bearer ${apiKey}` }
+        });
+        ok = res.ok;
+        if (!res.ok) message = `HTTP ${res.status}`;
+      } else if (config.provider === "mistral") {
+        const res = await fetch("https://api.mistral.ai/v1/models", {
+          headers: { Authorization: `Bearer ${apiKey}` }
+        });
+        ok = res.ok;
+        if (!res.ok) message = `HTTP ${res.status}`;
+      } else {
+        // search providers: assume ok if a key is stored
+        ok = true;
+      }
+    } catch (error) {
+      message = error instanceof Error ? error.message : "Unknown error";
+    }
+    const latencyMs = Date.now() - startedAt;
+    const checkedAt = new Date().toISOString();
+    repo.audit({
+      actorId: request.actor!.id,
+      action: "PROVIDER_TEST",
+      entityType: "AiProviderConfig",
+      entityId: config.id,
+      metadataJson: { ok, latencyMs, message },
+      ip: request.ip,
+      userAgent: request.headers["user-agent"] ?? null
+    });
+    return { ok, latencyMs, checkedAt, message };
+  });
+
   app.get("/superadmin/audit/events", { preHandler: auth(repo) }, async (request, reply) => {
     if (!canViewAudit(request.actor!)) return reply.code(403).send({ error: "Access denied" });
     return { events: repo.state.auditEvents };
