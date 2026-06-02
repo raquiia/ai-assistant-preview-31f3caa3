@@ -1117,7 +1117,123 @@ export function handleMock<T>(
     } as T;
   }
 
+  // ============================================================
+  // VAGUE 5 — Budget / Usage / Models / Ingestion Status
+  // ============================================================
+
+  if (method === "GET" && path === "/me/budget") {
+    const used = 47.32;
+    const limit = 80;
+    return {
+      period: "2026-06",
+      currency: "USD",
+      limit,
+      used,
+      remaining: Math.max(0, limit - used),
+      ratio: used / limit,
+      status: used / limit < 0.7 ? "ok" : used / limit < 0.9 ? "warn" : "blocked",
+      breakdown: { chat: 38.4, embeddings: 3.2, ocr: 4.1, transcription: 1.62 },
+      resetAt: "2026-07-01T00:00:00Z",
+    } as T;
+  }
+
+  if (method === "GET" && path.startsWith("/me/usage")) {
+    const days = 14;
+    const series = Array.from({ length: days }).map((_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (days - 1 - i));
+      const base = 2.4 + Math.sin(i / 2) * 1.1 + Math.random() * 0.6;
+      return {
+        date: d.toISOString().slice(0, 10),
+        cost: Number(base.toFixed(2)),
+        tokensIn: Math.round(8000 + Math.random() * 6000),
+        tokensOut: Math.round(2000 + Math.random() * 3000),
+        requests: Math.round(20 + Math.random() * 40),
+      };
+    });
+    const totals = series.reduce(
+      (acc, d) => ({
+        cost: acc.cost + d.cost,
+        tokensIn: acc.tokensIn + d.tokensIn,
+        tokensOut: acc.tokensOut + d.tokensOut,
+        requests: acc.requests + d.requests,
+      }),
+      { cost: 0, tokensIn: 0, tokensOut: 0, requests: 0 },
+    );
+    return {
+      series,
+      totals: { ...totals, cost: Number(totals.cost.toFixed(2)) },
+      byModel: [
+        { model: "anthropic.claude-3-5-sonnet", cost: 28.4, tokens: 412_000, requests: 124, share: 0.6 },
+        { model: "anthropic.claude-3-haiku", cost: 9.1, tokens: 287_000, requests: 96, share: 0.19 },
+        { model: "amazon.titan-embed-text-v2", cost: 3.2, tokens: 1_240_000, requests: 412, share: 0.07 },
+        { model: "mistral.mistral-large", cost: 6.62, tokens: 84_000, requests: 21, share: 0.14 },
+      ],
+    } as T;
+  }
+
+  if (method === "GET" && path === "/me/models") {
+    const role = session?.user.role ?? "CONSULTANT";
+    const all = [
+      { id: "anthropic.claude-3-haiku", label: "Claude 3 Haiku", provider: "AWS Bedrock", tier: "fast", contextWindow: 200_000, pricePer1kIn: 0.00025, pricePer1kOut: 0.00125, roles: ["CONSULTANT", "MANAGER", "SUPER_ADMIN"] },
+      { id: "anthropic.claude-3-5-sonnet", label: "Claude 3.5 Sonnet", provider: "AWS Bedrock", tier: "balanced", contextWindow: 200_000, pricePer1kIn: 0.003, pricePer1kOut: 0.015, roles: ["MANAGER", "SUPER_ADMIN"] },
+      { id: "anthropic.claude-3-opus", label: "Claude 3 Opus", provider: "AWS Bedrock", tier: "premium", contextWindow: 200_000, pricePer1kIn: 0.015, pricePer1kOut: 0.075, roles: ["SUPER_ADMIN"] },
+      { id: "mistral.mistral-large", label: "Mistral Large", provider: "AWS Bedrock", tier: "balanced", contextWindow: 32_000, pricePer1kIn: 0.004, pricePer1kOut: 0.012, roles: ["MANAGER", "SUPER_ADMIN"] },
+    ];
+    const allowed = all.filter((mm) => mm.roles.includes(role));
+    return {
+      defaultModel: allowed[0]?.id ?? null,
+      models: allowed.map((mm) => ({ ...mm, allowed: true })),
+      restricted: all.filter((mm) => !mm.roles.includes(role)).map((mm) => ({ ...mm, allowed: false })),
+      quotas: {
+        rpm: role === "SUPER_ADMIN" ? 120 : role === "MANAGER" ? 60 : 20,
+        tpm: role === "SUPER_ADMIN" ? 200_000 : role === "MANAGER" ? 100_000 : 40_000,
+      },
+    } as T;
+  }
+
+  if (method === "GET" && path.startsWith("/admin/usage")) {
+    return {
+      totals: { cost: 1284.55, tokensIn: 12_400_000, tokensOut: 3_800_000, requests: 4820, activeUsers: 38 },
+      topUsers: [
+        { userId: "u1", name: "Léa M.", cost: 142.3, requests: 380, model: "anthropic.claude-3-5-sonnet" },
+        { userId: "u2", name: "Karim B.", cost: 98.1, requests: 220, model: "anthropic.claude-3-5-sonnet" },
+        { userId: "u3", name: "Sofia P.", cost: 76.4, requests: 198, model: "anthropic.claude-3-haiku" },
+        { userId: "u4", name: "Nathan R.", cost: 61.8, requests: 142, model: "mistral.mistral-large" },
+      ],
+      byOrg: [
+        { orgId: "org-pcb-fr", name: "PCUBED France", cost: 612.3, share: 0.48 },
+        { orgId: "org-pcb-uk", name: "PCUBED UK", cost: 401.1, share: 0.31 },
+        { orgId: "org-migso", name: "MIGSO Group", cost: 271.15, share: 0.21 },
+      ],
+    } as T;
+  }
+
+  m = match(path, "/kb/documents/:id/execution");
+  if (method === "GET" && m) {
+    const states = [
+      { name: "Classify", status: "SUCCEEDED", startedAt: -120, durationMs: 480 },
+      { name: "RouteHeavy", status: "SUCCEEDED", startedAt: -115, durationMs: 60 },
+      { name: "TextractAsync", status: "SUCCEEDED", startedAt: -113, durationMs: 38_400 },
+      { name: "Chunk", status: "SUCCEEDED", startedAt: -74, durationMs: 920 },
+      { name: "EmbedParallelMap", status: "RUNNING", startedAt: -72, durationMs: null },
+      { name: "IndexAOSS", status: "PENDING", startedAt: null, durationMs: null },
+      { name: "Notify", status: "PENDING", startedAt: null, durationMs: null },
+    ];
+    return {
+      documentId: m.id,
+      executionArn: `arn:aws:states:eu-west-3:111122223333:execution:mp-ingestion:${m.id}-exec`,
+      stateMachine: "mp-ingestion",
+      status: "RUNNING",
+      startedAt: new Date(Date.now() - 120_000).toISOString(),
+      states,
+      progress: 4 / states.length,
+      cost: { textractPages: 32, embeddingsTokens: 184_000, estimatedUsd: 0.42 },
+    } as T;
+  }
+
   // Fallback no-op
   return {} as T;
 }
+
 
