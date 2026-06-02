@@ -1167,4 +1167,3 @@ function toJit(u: User): import("./services/jitProvisioning.js").JitUser {
   };
 }
 
-}
