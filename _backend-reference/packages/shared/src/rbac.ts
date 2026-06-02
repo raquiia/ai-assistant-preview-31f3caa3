@@ -25,6 +25,20 @@ export function canUploadKnowledge(actor: User): boolean {
   return actor.role === "SUPER_ADMIN";
 }
 
+/** Alias sémantique : publish / reindex / archive / upload — toutes les
+ *  écritures sur la base de connaissance. */
+export const canManageKnowledge = canUploadKnowledge;
+
+/** Lecture seule sur la KB : SUPER_ADMIN (édite), MANAGER (consulte les
+ *  documents auxquels ses consultants accèdent), AUDITOR (revue de conformité). */
+export function canReadKnowledge(actor: User): boolean {
+  return (
+    actor.role === "SUPER_ADMIN" ||
+    actor.role === "MANAGER" ||
+    actor.role === "AUDITOR"
+  );
+}
+
 export function canViewConversation(actor: User, conversation: Conversation): boolean {
   if (actor.role === "SUPER_ADMIN") return true;
   if (actor.role === "AUDITOR") return false;
