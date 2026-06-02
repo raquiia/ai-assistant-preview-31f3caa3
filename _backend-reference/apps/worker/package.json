@@ -1,0 +1,23 @@
+{
+  "name": "@mp/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/worker.ts",
+    "start": "tsx src/worker.ts",
+    "ingest:sample": "tsx src/ingestSample.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mp/rag": "0.1.0",
+    "@mp/shared": "0.1.0",
+    "bullmq": "^5.34.0",
+    "ioredis": "^5.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

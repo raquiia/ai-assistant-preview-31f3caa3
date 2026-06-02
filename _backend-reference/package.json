@@ -1,0 +1,34 @@
+{
+  "name": "migso-pcubed-ai-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web,worker -c blue,cyan,green \"npm run dev:api\" \"npm run dev:web\" \"npm run dev:worker\"",
+    "dev:api": "npm run dev -w @mp/api",
+    "dev:web": "npm run dev -w @mp/web",
+    "dev:worker": "npm run dev -w @mp/worker",
+    "build": "npm run build -ws --if-present",
+    "test": "npm run test -ws --if-present",
+    "lint": "npm run lint -ws --if-present",
+    "db:migrate": "prisma migrate dev --schema prisma/schema.prisma",
+    "db:generate": "prisma generate --schema prisma/schema.prisma",
+    "seed": "tsx prisma/seed.ts",
+    "ingest:sample": "npm run ingest:sample -w @mp/worker"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "concurrently": "^9.1.0",
+    "prisma": "^6.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.1.0"
+  }
+}

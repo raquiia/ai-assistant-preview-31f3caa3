@@ -1,0 +1,341 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CONSULTANT
+  MANAGER
+  SUPER_ADMIN
+  AUDITOR
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  PENDING_MANAGER
+}
+
+enum ConversationChannel {
+  WEB
+  EMBED
+  API
+}
+
+enum MessageRole {
+  user
+  assistant
+  system
+}
+
+enum DocumentStatus {
+  UPLOADED
+  PROCESSING
+  NEEDS_REVIEW
+  PUBLISHED
+  ARCHIVED
+  ERROR
+}
+
+enum CorrectionStatus {
+  DRAFT
+  APPROVED
+  ACTIVE
+  REJECTED
+}
+
+enum FeedbackRating {
+  UP
+  DOWN
+  ONE
+  TWO
+  THREE
+  FOUR
+  FIVE
+}
+
+model User {
+  id              String            @id @default(cuid())
+  email           String            @unique
+  name            String
+  role            Role
+  managerId       String?
+  manager         User?             @relation("ManagerConsultants", fields: [managerId], references: [id])
+  consultants     User[]            @relation("ManagerConsultants")
+  language        String            @default("fr")
+  status          UserStatus        @default(ACTIVE)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  managerProfile  ManagerProfile?
+  conversations   Conversation[]    @relation("ConversationUser")
+  managedConvos   Conversation[]    @relation("ConversationManager")
+  documents       Document[]
+  feedback        Feedback[]
+  adminComments   AdminComment[]
+  promptVersions  PromptVersion[]
+  approvedCorrections KnowledgeCorrection[] @relation("CorrectionApprover")
+  auditEvents     AuditEvent[]      @relation("AuditActor")
+
+  @@index([role, status])
+  @@index([managerId])
+}
+
+model ManagerProfile {
+  id         String  @id @default(cuid())
+  userId     String  @unique
+  user       User    @relation(fields: [userId], references: [id])
+  department String
+  active     Boolean @default(true)
+
+  @@index([active])
+}
+
+model Conversation {
+  id        String              @id @default(cuid())
+  userId    String
+  user      User                @relation("ConversationUser", fields: [userId], references: [id])
+  managerId String?
+  manager   User?               @relation("ConversationManager", fields: [managerId], references: [id])
+  title     String
+  language  String
+  channel   ConversationChannel @default(WEB)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  messages  Message[]
+
+  @@index([userId, createdAt])
+  @@index([managerId, createdAt])
+  @@index([channel])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  role           MessageRole
+  content        String
+  language       String
+  createdAt      DateTime     @default(now())
+  attachments    Attachment[]
+  aiResponses    AiResponse[]
+
+  @@index([conversationId, createdAt])
+  @@index([role])
+}
+
+model Attachment {
+  id               String         @id @default(cuid())
+  messageId        String?
+  message          Message?       @relation(fields: [messageId], references: [id])
+  objectKey        String
+  fileName         String
+  mimeType         String
+  sizeBytes        Int
+  status           DocumentStatus @default(UPLOADED)
+  extractedTextRef String?
+
+  @@index([messageId])
+  @@index([status])
+}
+
+model AiResponse {
+  id                  String          @id @default(cuid())
+  messageId           String
+  message             Message         @relation(fields: [messageId], references: [id])
+  provider            String
+  model               String
+  promptVersionId     String
+  promptVersion       PromptVersion   @relation(fields: [promptVersionId], references: [id])
+  content             String
+  confidence          Int
+  latencyMs           Int
+  fallbackUsed        Boolean         @default(false)
+  escalationTriggered Boolean         @default(false)
+  comparisonId        String?
+  createdAt           DateTime        @default(now())
+  usage               AiUsage?
+  feedback            Feedback[]
+  adminComments       AdminComment[]
+  retrievalEvents     RetrievalEvent[]
+
+  @@index([createdAt])
+  @@index([provider, model])
+  @@index([fallbackUsed, escalationTriggered])
+}
+
+model AiUsage {
+  id              String     @id @default(cuid())
+  responseId      String     @unique
+  response        AiResponse @relation(fields: [responseId], references: [id])
+  inputTokens     Int
+  outputTokens    Int
+  reasoningTokens Int        @default(0)
+  cachedTokens    Int        @default(0)
+  estimatedCost   Decimal    @default(0)
+  currency        String     @default("EUR")
+}
+
+model Feedback {
+  id         String         @id @default(cuid())
+  responseId String
+  response   AiResponse     @relation(fields: [responseId], references: [id])
+  userId     String
+  user       User           @relation(fields: [userId], references: [id])
+  rating     FeedbackRating
+  comment    String?
+  createdAt  DateTime       @default(now())
+
+  @@index([responseId])
+  @@index([rating, createdAt])
+}
+
+model AdminComment {
+  id         String           @id @default(cuid())
+  responseId String
+  response   AiResponse       @relation(fields: [responseId], references: [id])
+  adminId    String
+  admin      User             @relation(fields: [adminId], references: [id])
+  comment    String
+  status     CorrectionStatus @default(DRAFT)
+  createdAt  DateTime         @default(now())
+  correction KnowledgeCorrection?
+
+  @@index([responseId])
+  @@index([status])
+}
+
+model KnowledgeCorrection {
+  id             String           @id @default(cuid())
+  adminCommentId String           @unique
+  adminComment   AdminComment     @relation(fields: [adminCommentId], references: [id])
+  title          String
+  content        String
+  tags           String[]
+  status         CorrectionStatus @default(DRAFT)
+  approvedById   String?
+  approvedBy     User?            @relation("CorrectionApprover", fields: [approvedById], references: [id])
+  activatedAt    DateTime?
+
+  @@index([status])
+}
+
+model Document {
+  id        String         @id @default(cuid())
+  title     String
+  ownerId   String
+  owner     User           @relation(fields: [ownerId], references: [id])
+  objectKey String
+  mimeType  String
+  status    DocumentStatus @default(UPLOADED)
+  version   Int            @default(1)
+  checksum  String
+  language  String
+  createdAt DateTime       @default(now())
+  chunks    DocumentChunk[]
+
+  @@unique([objectKey, version])
+  @@index([status])
+  @@index([language])
+  @@index([checksum])
+}
+
+model DocumentChunk {
+  id            String           @id @default(cuid())
+  documentId    String
+  document      Document         @relation(fields: [documentId], references: [id])
+  version       Int
+  text          String
+  language      String
+  page          Int?
+  section       String?
+  paragraph     Int?
+  charStart     Int?
+  charEnd       Int?
+  timeStart     Float?
+  timeEnd       Float?
+  industryTags  String[]
+  pmDomainTags  String[]
+  vectorId      String           @unique
+  sourceUri     String
+  createdAt     DateTime         @default(now())
+  retrievalEvents RetrievalEvent[]
+
+  @@index([documentId, version])
+  @@index([language])
+  @@index([industryTags], type: Gin)
+  @@index([pmDomainTags], type: Gin)
+}
+
+model RetrievalEvent {
+  id           String        @id @default(cuid())
+  responseId   String
+  response     AiResponse    @relation(fields: [responseId], references: [id])
+  chunkId      String
+  chunk        DocumentChunk @relation(fields: [chunkId], references: [id])
+  score        Int
+  rank         Int
+  usedInAnswer Boolean       @default(false)
+
+  @@index([responseId])
+  @@index([chunkId])
+  @@index([score])
+}
+
+model PromptVersion {
+  id          String       @id @default(cuid())
+  name        String
+  content     String
+  configJson  Json
+  createdById String
+  createdBy   User         @relation(fields: [createdById], references: [id])
+  active      Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+  responses   AiResponse[]
+
+  @@index([active])
+  @@index([createdAt])
+}
+
+model AiProviderConfig {
+  id                 String   @id @default(cuid())
+  provider           String
+  encryptedApiKeyRef String?
+  model              String
+  configJson         Json
+  active             Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([provider, active])
+}
+
+model AuditEvent {
+  id           String   @id @default(cuid())
+  actorId      String?
+  actor        User?    @relation("AuditActor", fields: [actorId], references: [id])
+  action       String
+  entityType   String
+  entityId     String?
+  metadataJson Json
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@index([entityType, entityId])
+}
+
+model SystemMetricDaily {
+  id             String   @id @default(cuid())
+  date           DateTime
+  metricName     String
+  value          Decimal
+  dimensionsJson Json
+
+  @@index([metricName, date])
+}
