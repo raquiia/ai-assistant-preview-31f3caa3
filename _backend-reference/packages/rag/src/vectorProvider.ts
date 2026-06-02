@@ -44,11 +44,52 @@ export class OpenSearchVectorProvider implements VectorProvider {
     }).catch(() => undefined);
   }
 
-  async search(_vector: number[], topK: number): Promise<Array<{ id: string; score: number }>> {
+  async search(
+    vector: number[],
+    topK: number,
+    filters?: Record<string, unknown>,
+  ): Promise<Array<{ id: string; score: number }>> {
+    // Filtres optionnels : industryTags / pmDomainTags. Les chunks SANS tag (génériques)
+    // sont toujours candidats, via une clause "missing" sur le champ.
+    const industryTags = Array.isArray(filters?.industryTags) ? (filters!.industryTags as string[]) : [];
+    const pmDomainTags = Array.isArray(filters?.pmDomainTags) ? (filters!.pmDomainTags as string[]) : [];
+
+    const filterClauses: unknown[] = [];
+    if (industryTags.length) {
+      filterClauses.push({
+        bool: {
+          should: [
+            { terms: { industry_tags: industryTags } },
+            { bool: { must_not: { exists: { field: "industry_tags" } } } },
+          ],
+          minimum_should_match: 1,
+        },
+      });
+    }
+    if (pmDomainTags.length) {
+      filterClauses.push({
+        bool: {
+          should: [
+            { terms: { pm_domain_tags: pmDomainTags } },
+            { bool: { must_not: { exists: { field: "pm_domain_tags" } } } },
+          ],
+          minimum_should_match: 1,
+        },
+      });
+    }
+
     await fetch(`${this.endpoint}/mp-document-chunks/_search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ size: topK, query: { match_all: {} } })
+      body: JSON.stringify({
+        size: topK,
+        query: {
+          bool: {
+            must: [{ knn: { vector: { vector, k: topK } } }],
+            filter: filterClauses,
+          },
+        },
+      }),
     }).catch(() => undefined);
     return [];
   }

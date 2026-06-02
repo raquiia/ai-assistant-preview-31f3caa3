@@ -24,7 +24,25 @@ import { MessageBubble } from "./MessageBubble";
 import { SourceCards } from "./SourceCards";
 import { SourceViewer } from "./SourceViewer";
 import { VoiceInput } from "./VoiceInput";
+import { ChatFiltersBar } from "./ChatFilters";
+import { labelForIndustry, labelForPmDomain, type ChatFilters } from "../shared";
 import { toast } from "sonner";
+
+const FILTERS_STORAGE_KEY = "mp.chat.filters.v1";
+function loadFilters(): ChatFilters {
+  if (typeof window === "undefined") return { industryTags: [], pmDomainTags: [] };
+  try {
+    const raw = window.localStorage.getItem(FILTERS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<ChatFilters>;
+      return {
+        industryTags: Array.isArray(parsed.industryTags) ? parsed.industryTags : [],
+        pmDomainTags: Array.isArray(parsed.pmDomainTags) ? parsed.pmDomainTags : [],
+      };
+    }
+  } catch {}
+  return { industryTags: [], pmDomainTags: [] };
+}
 
 const SUGGESTIONS = [
   { icon: Sparkles, label: "Construire un planning multi-projet", prompt: "Comment structurer un planning multi-projet avec dépendances inter-équipes ?" },
@@ -42,8 +60,13 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
   const [loading, setLoading] = useState(false);
   const [showConversations, setShowConversations] = useState(false);
   const [showSources, setShowSources] = useState(false);
+  const [filters, setFilters] = useState<ChatFilters>(() => loadFilters());
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    try { window.localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(filters)); } catch {}
+  }, [filters]);
 
   useEffect(() => { void refreshConversations(); }, []);
   useEffect(() => {
@@ -115,7 +138,11 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
       };
       setMessages((prev) => [...prev, optimistic]);
 
-      const answer = await api.post<ChatAnswerPayload>(`/chat/conversations/${conversationId}/messages`, { content: trimmed });
+      const answer = await api.post<ChatAnswerPayload>(`/chat/conversations/${conversationId}/messages`, {
+        content: trimmed,
+        industryTags: filters.industryTags,
+        pmDomainTags: filters.pmDomainTags,
+      });
       await loadConversation(conversationId);
       setLastAnswer(answer);
       await refreshConversations();
@@ -256,6 +283,23 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
                             <Badge variant="outline" className="border-warning/40 bg-warning/10 text-warning">escalade</Badge>
                           )}
                         </div>
+                        {lastAnswer.appliedFilters &&
+                          (lastAnswer.appliedFilters.industryTags.length > 0 ||
+                            lastAnswer.appliedFilters.pmDomainTags.length > 0) && (
+                            <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                              <span className="text-muted-foreground">Orientée:</span>
+                              {lastAnswer.appliedFilters.industryTags.map((t) => (
+                                <Badge key={`i-${t}`} variant="outline" className="border-primary/30 bg-primary/5 text-[10px]">
+                                  {labelForIndustry(t)}
+                                </Badge>
+                              ))}
+                              {lastAnswer.appliedFilters.pmDomainTags.map((t) => (
+                                <Badge key={`d-${t}`} variant="outline" className="border-primary/30 bg-primary/5 text-[10px]">
+                                  {labelForPmDomain(t)}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
                         <div>
                           <div className="mb-1 flex items-center justify-between text-xs">
                             <span className="text-muted-foreground">Confiance · {confLabel}</span>
@@ -289,6 +333,12 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
           {/* Input */}
           <div className="border-t bg-background/95 px-3 py-3 backdrop-blur-xl lg:px-6 lg:py-4">
             <div className="mx-auto w-full max-w-3xl">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <ChatFiltersBar filters={filters} onChange={setFilters} />
+                <span className="hidden text-[10px] text-muted-foreground sm:inline">
+                  Orientez les sources par secteur et/ou domaine
+                </span>
+              </div>
               <div className="group relative flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-soft transition focus-within:border-primary/40 focus-within:shadow-glow">
                 <textarea
                   ref={textareaRef}

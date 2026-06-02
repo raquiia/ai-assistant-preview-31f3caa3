@@ -1,6 +1,7 @@
 import { FileText, RefreshCcw, ShieldCheck, UploadCloud } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { DocumentRecord } from "../shared";
+import { labelForIndustry, labelForPmDomain } from "../shared";
 import type { ApiClient } from "../api";
 import type { Session } from "../types";
 import { AdminLayout } from "./AdminLayout";
@@ -152,6 +153,30 @@ export function KnowledgeBaseAdmin({ api, session }: { api: ApiClient; session: 
                 { key: "mimeType", header: "Type", render: (row) => (
                   <span className="font-mono text-xs text-muted-foreground">{row.mimeType}</span>
                 ) },
+                {
+                  key: "tags",
+                  header: "Tags",
+                  render: (row) => {
+                    const tags = [
+                      ...(row.industryTags ?? []).map((t) => ({ k: `i-${t}`, label: labelForIndustry(t), kind: "i" as const })),
+                      ...(row.pmDomainTags ?? []).map((t) => ({ k: `d-${t}`, label: labelForPmDomain(t), kind: "d" as const })),
+                    ];
+                    if (tags.length === 0) return <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">Générique</span>;
+                    return (
+                      <div className="flex flex-wrap gap-1">
+                        {tags.slice(0, 3).map((t) => (
+                          <span
+                            key={t.k}
+                            className={`rounded-full px-1.5 py-0.5 text-[9px] font-medium ${t.kind === "i" ? "border border-primary/20 bg-primary/5 text-primary" : "border border-muted-foreground/20 bg-muted/60 text-muted-foreground"}`}
+                          >
+                            {t.label}
+                          </span>
+                        ))}
+                        {tags.length > 3 && <span className="text-[10px] text-muted-foreground">+{tags.length - 3}</span>}
+                      </div>
+                    );
+                  },
+                },
                 {
                   key: "status",
                   header: "Statut",

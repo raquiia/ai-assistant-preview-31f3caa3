@@ -123,35 +123,108 @@ function id(prefix: string) {
   return `${prefix}-${nextId}`;
 }
 
-function mockSources(): SourceCitation[] {
-  return [
-    {
-      chunkId: "ch-1",
-      documentId: "d-1",
-      title: "Guide WBS MIGSO-PCUBED",
-      page: 12,
-      section: "3.2 Découpage",
-      excerpt:
-        "Un découpage WBS efficace pour l'aéronautique s'appuie sur les jalons certifiants et les lots systèmes…",
-      score: 0.91,
-      sourceUri: "s3://kb/wbs-guide.pdf",
-    },
-    {
-      chunkId: "ch-2",
-      documentId: "d-2",
-      title: "Référentiel PMI – PMBOK 7",
-      section: "Principes",
-      excerpt: "Les principes de découpage hiérarchique restent applicables, en alignement avec les domaines de performance…",
-      score: 0.84,
-      sourceUri: "s3://kb/pmbok7.pdf",
-    },
-  ];
+const ALL_MOCK_SOURCES: SourceCitation[] = [
+  {
+    chunkId: "ch-1",
+    documentId: "d-1",
+    title: "Guide WBS MIGSO-PCUBED — Aéronautique",
+    page: 12,
+    section: "3.2 Découpage",
+    excerpt:
+      "Un découpage WBS efficace pour l'aéronautique s'appuie sur les jalons certifiants et les lots systèmes…",
+    score: 0.91,
+    sourceUri: "s3://kb/wbs-guide.pdf",
+    industryTags: ["aeronautique", "defense"],
+    pmDomainTags: ["planning/scheduling", "scope/requirements"],
+  },
+  {
+    chunkId: "ch-2",
+    documentId: "d-2",
+    title: "Référentiel PMI – PMBOK 7",
+    section: "Principes",
+    excerpt:
+      "Les principes de découpage hiérarchique restent applicables, en alignement avec les domaines de performance…",
+    score: 0.84,
+    sourceUri: "s3://kb/pmbok7.pdf",
+    industryTags: [],
+    pmDomainTags: [],
+  },
+  {
+    chunkId: "ch-3",
+    documentId: "d-4",
+    title: "Risk Management Pharma — Validation GxP",
+    page: 7,
+    section: "4. Mitigation",
+    excerpt:
+      "Les risques projet en pharma sont indissociables des contraintes GxP et de la traçabilité des changes…",
+    score: 0.78,
+    sourceUri: "s3://kb/risk-pharma.pdf",
+    industryTags: ["pharma"],
+    pmDomainTags: ["risk management", "change control", "quality"],
+  },
+  {
+    chunkId: "ch-4",
+    documentId: "d-5",
+    title: "Cost Control Nucléaire — EVM long cycle",
+    page: 24,
+    section: "EVM",
+    excerpt:
+      "Sur les programmes nucléaires, l'Earned Value sur des cycles longs nécessite une rebaseline annuelle structurée…",
+    score: 0.73,
+    sourceUri: "s3://kb/cost-nuke.pdf",
+    industryTags: ["nucleaire", "energie"],
+    pmDomainTags: ["cost control", "earned value", "reporting/KPI"],
+  },
+  {
+    chunkId: "ch-5",
+    documentId: "d-6",
+    title: "Outillage Agile IT — Jira & Smartsheet",
+    section: "Bonnes pratiques",
+    excerpt:
+      "Pour un programme IT, l'orchestration Jira ↔ Smartsheet permet de connecter delivery agile et planning portefeuille…",
+    score: 0.7,
+    sourceUri: "s3://kb/tools-it.md",
+    industryTags: ["IT/digital"],
+    pmDomainTags: ["agile/delivery", "tools P6/MS Project/Jira/Smartsheet"],
+  },
+];
+
+function filterSources(filters?: { industryTags?: string[]; pmDomainTags?: string[] }): SourceCitation[] {
+  const ind = filters?.industryTags ?? [];
+  const dom = filters?.pmDomainTags ?? [];
+  return ALL_MOCK_SOURCES.filter((s) => {
+    const sInd = s.industryTags ?? [];
+    const sDom = s.pmDomainTags ?? [];
+    // Documents génériques (sans tag) sont toujours candidats.
+    const indOk = ind.length === 0 || sInd.length === 0 || ind.some((t) => sInd.includes(t));
+    const domOk = dom.length === 0 || sDom.length === 0 || dom.some((t) => sDom.includes(t));
+    return indOk && domOk;
+  });
+}
+
+function mockSources(filters?: { industryTags?: string[]; pmDomainTags?: string[] }): SourceCitation[] {
+  return filterSources(filters);
+}
+
+function extractUploadFields(body: unknown): { title: string; industryTags: string[]; pmDomainTags: string[] } {
+  if (body instanceof FormData) {
+    const title = String(body.get("title") ?? body.get("file") ?? "Document");
+    const ind = body.getAll("industryTags").map(String).filter(Boolean);
+    const dom = body.getAll("pmDomainTags").map(String).filter(Boolean);
+    return { title, industryTags: ind, pmDomainTags: dom };
+  }
+  const b = (body ?? {}) as { title?: string; industryTags?: string[]; pmDomainTags?: string[] };
+  return {
+    title: b.title ?? "Document",
+    industryTags: Array.isArray(b.industryTags) ? b.industryTags : [],
+    pmDomainTags: Array.isArray(b.pmDomainTags) ? b.pmDomainTags : [],
+  };
 }
 
 const documents: DocumentRecord[] = [
   {
     id: "d-1",
-    title: "Guide WBS MIGSO-PCUBED",
+    title: "Guide WBS MIGSO-PCUBED — Aéronautique",
     ownerId: "u-mgr",
     objectKey: "kb/wbs-guide.pdf",
     mimeType: "application/pdf",
@@ -160,6 +233,8 @@ const documents: DocumentRecord[] = [
     checksum: "abc",
     language: "fr",
     createdAt: now(),
+    industryTags: ["aeronautique", "defense"],
+    pmDomainTags: ["planning/scheduling", "scope/requirements"],
   },
   {
     id: "d-2",
@@ -172,6 +247,8 @@ const documents: DocumentRecord[] = [
     checksum: "def",
     language: "en",
     createdAt: now(),
+    industryTags: [],
+    pmDomainTags: [],
   },
   {
     id: "d-3",
@@ -184,6 +261,50 @@ const documents: DocumentRecord[] = [
     checksum: "ghi",
     language: "fr",
     createdAt: now(),
+    industryTags: [],
+    pmDomainTags: ["PMO governance"],
+  },
+  {
+    id: "d-4",
+    title: "Risk Management Pharma — Validation GxP",
+    ownerId: "u-super",
+    objectKey: "kb/risk-pharma.pdf",
+    mimeType: "application/pdf",
+    status: "PUBLISHED",
+    version: 2,
+    checksum: "jkl",
+    language: "fr",
+    createdAt: now(),
+    industryTags: ["pharma"],
+    pmDomainTags: ["risk management", "change control", "quality"],
+  },
+  {
+    id: "d-5",
+    title: "Cost Control Nucléaire — EVM long cycle",
+    ownerId: "u-super",
+    objectKey: "kb/cost-nuke.pdf",
+    mimeType: "application/pdf",
+    status: "PUBLISHED",
+    version: 1,
+    checksum: "mno",
+    language: "fr",
+    createdAt: now(),
+    industryTags: ["nucleaire", "energie"],
+    pmDomainTags: ["cost control", "earned value", "reporting/KPI"],
+  },
+  {
+    id: "d-6",
+    title: "Outillage Agile IT — Jira & Smartsheet",
+    ownerId: "u-mgr",
+    objectKey: "kb/tools-it.md",
+    mimeType: "text/markdown",
+    status: "PUBLISHED",
+    version: 1,
+    checksum: "pqr",
+    language: "fr",
+    createdAt: now(),
+    industryTags: ["IT/digital"],
+    pmDomainTags: ["agile/delivery", "tools P6/MS Project/Jira/Smartsheet"],
   },
 ];
 
@@ -346,8 +467,16 @@ function sessionFor(email: string): Session | null {
   };
 }
 
-function buildAnswer(question: string): ChatAnswerPayload {
+function buildAnswer(
+  question: string,
+  filters?: { industryTags?: string[]; pmDomainTags?: string[] },
+): ChatAnswerPayload {
   const responseId = id("r");
+  const sources = mockSources(filters);
+  const orientation =
+    filters && ((filters.industryTags?.length ?? 0) + (filters.pmDomainTags?.length ?? 0) > 0)
+      ? ` (orientée ${[...(filters.industryTags ?? []), ...(filters.pmDomainTags ?? [])].join(", ")})`
+      : "";
   return {
     response: {
       id: responseId,
@@ -355,7 +484,7 @@ function buildAnswer(question: string): ChatAnswerPayload {
       provider: "mistral",
       model: "mistral-large-latest",
       promptVersionId: "p-1",
-      content: `Réponse mockée à : "${question.slice(0, 80)}". Brancher VITE_USE_MOCKS=false pour utiliser l'API Fastify.`,
+      content: `Réponse mockée${orientation} à : "${question.slice(0, 80)}". Brancher VITE_USE_MOCKS=false pour utiliser l'API Fastify.`,
       confidence: 0.78,
       latencyMs: 420,
       fallbackUsed: false,
@@ -372,8 +501,12 @@ function buildAnswer(question: string): ChatAnswerPayload {
       estimatedCost: 0.0021,
       currency: "EUR",
     },
-    answer: `Réponse mockée à : "${question.slice(0, 80)}". Brancher VITE_USE_MOCKS=false pour utiliser l'API Fastify.`,
-    sources: mockSources(),
+    answer: `Réponse mockée${orientation} à : "${question.slice(0, 80)}". Brancher VITE_USE_MOCKS=false pour utiliser l'API Fastify.`,
+    sources,
+    appliedFilters: {
+      industryTags: filters?.industryTags ?? [],
+      pmDomainTags: filters?.pmDomainTags ?? [],
+    },
   };
 }
 
@@ -555,7 +688,12 @@ export function handleMock<T>(
   }
   m = match(path, "/chat/conversations/:id/messages");
   if (method === "POST" && m) {
-    const content = (body as { content?: string })?.content ?? "";
+    const payload = (body as { content?: string; industryTags?: string[]; pmDomainTags?: string[] }) ?? {};
+    const content = payload.content ?? "";
+    const filters = {
+      industryTags: Array.isArray(payload.industryTags) ? payload.industryTags : [],
+      pmDomainTags: Array.isArray(payload.pmDomainTags) ? payload.pmDomainTags : [],
+    };
     const list = (messagesByConv[m.id] ??= []);
     list.push({
       id: id("m"),
@@ -565,7 +703,7 @@ export function handleMock<T>(
       language: "fr",
       createdAt: now(),
     });
-    const answer = buildAnswer(content);
+    const answer = buildAnswer(content, filters);
     list.push({
       id: answer.response.messageId,
       conversationId: m.id,
@@ -745,7 +883,7 @@ export function handleMock<T>(
   }
   if (method === "POST" && path === "/kb/documents") {
     if (session?.user.role !== "SUPER_ADMIN") throw new Error("403 — Seul le Super Admin peut alimenter la base de connaissance");
-    const title = body instanceof FormData ? String(body.get("title") ?? "Document") : "Document";
+    const { title, industryTags, pmDomainTags } = extractUploadFields(body);
     const doc: DocumentRecord = {
       id: id("d"),
       title,
@@ -757,6 +895,8 @@ export function handleMock<T>(
       checksum: "mock",
       language: "fr",
       createdAt: now(),
+      industryTags,
+      pmDomainTags,
     };
     documents.unshift(doc);
     return { document: doc } as T;
@@ -880,10 +1020,7 @@ export function handleMock<T>(
   }
   if (method === "POST" && path === "/kb/upload") {
     if (session?.user.role !== "SUPER_ADMIN") throw new Error("403 — Seul le Super Admin peut uploader des documents");
-    const title =
-      body instanceof FormData
-        ? String(body.get("title") ?? "Document")
-        : ((body as { title?: string })?.title ?? "Document");
+    const { title, industryTags, pmDomainTags } = extractUploadFields(body);
     const doc: DocumentRecord = {
       id: id("d"),
       title,
@@ -895,6 +1032,8 @@ export function handleMock<T>(
       checksum: "mock",
       language: "fr",
       createdAt: now(),
+      industryTags,
+      pmDomainTags,
     };
     documents.unshift(doc);
     return { document: doc } as T;

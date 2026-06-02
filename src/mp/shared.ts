@@ -101,6 +101,8 @@ export interface DocumentRecord {
   checksum: string;
   language: string;
   createdAt: string;
+  industryTags?: string[];
+  pmDomainTags?: string[];
 }
 
 export interface SourceCitation {
@@ -115,6 +117,57 @@ export interface SourceCitation {
   excerpt: string;
   score: number;
   sourceUri: string;
+  industryTags?: string[];
+  pmDomainTags?: string[];
+}
+
+// ===== Taxonomie (alignée sur _backend-reference/packages/rag/src/taxonomy.ts) =====
+export const INDUSTRIES = [
+  { value: "aeronautique", label: "Aéronautique" },
+  { value: "defense", label: "Défense" },
+  { value: "pharma", label: "Pharma" },
+  { value: "energie", label: "Énergie" },
+  { value: "nucleaire", label: "Nucléaire" },
+  { value: "automobile", label: "Automobile" },
+  { value: "transport/rail", label: "Transport / Rail" },
+  { value: "manufacturing", label: "Manufacturing" },
+  { value: "IT/digital", label: "IT / Digital" },
+  { value: "finance", label: "Finance" },
+  { value: "secteur public", label: "Secteur public" },
+  { value: "infrastructure", label: "Infrastructure" },
+  { value: "autres", label: "Autres" },
+] as const;
+
+export const PM_DOMAINS = [
+  { value: "planning/scheduling", label: "Planning / Scheduling" },
+  { value: "cost control", label: "Cost Control" },
+  { value: "risk management", label: "Risk Management" },
+  { value: "scope/requirements", label: "Scope / Requirements" },
+  { value: "change control", label: "Change Control" },
+  { value: "PMO governance", label: "PMO Governance" },
+  { value: "resource management", label: "Resource Management" },
+  { value: "quality", label: "Quality" },
+  { value: "reporting/KPI", label: "Reporting / KPI" },
+  { value: "earned value", label: "Earned Value" },
+  { value: "procurement", label: "Procurement" },
+  { value: "stakeholder management", label: "Stakeholder Mgmt" },
+  { value: "agile/delivery", label: "Agile / Delivery" },
+  { value: "tools P6/MS Project/Jira/Smartsheet", label: "Outils (P6, MS Project, Jira, Smartsheet…)" },
+] as const;
+
+export type IndustryTag = typeof INDUSTRIES[number]["value"];
+export type PmDomainTag = typeof PM_DOMAINS[number]["value"];
+
+export interface ChatFilters {
+  industryTags: string[];
+  pmDomainTags: string[];
+}
+
+export function labelForIndustry(value: string): string {
+  return INDUSTRIES.find((i) => i.value === value)?.label ?? value;
+}
+export function labelForPmDomain(value: string): string {
+  return PM_DOMAINS.find((d) => d.value === value)?.label ?? value;
 }
 
 export interface PromptVersion {
