@@ -9,9 +9,10 @@ import {
   MessageSquareText,
   ShieldCheck,
   Sparkles,
+  UserCheck,
   Users,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Sidebar,
   SidebarContent,
@@ -37,6 +38,7 @@ interface NavItem {
   icon: typeof Bot;
   roles: Role[];
   group: "work" | "admin";
+  badgeKey?: "approvals";
 }
 
 const NAV: NavItem[] = [
@@ -44,11 +46,13 @@ const NAV: NavItem[] = [
   { key: "history", label: "Historique", icon: History, roles: ["MANAGER", "SUPER_ADMIN", "AUDITOR"], group: "work" },
   { key: "dashboard", label: "Dashboard", icon: Gauge, roles: ["MANAGER", "SUPER_ADMIN", "AUDITOR"], group: "work" },
   { key: "kb", label: "Knowledge Base", icon: Database, roles: ["MANAGER", "SUPER_ADMIN", "AUDITOR"], group: "work" },
+  { key: "approvals", label: "Approbations", icon: UserCheck, roles: ["MANAGER", "SUPER_ADMIN"], group: "admin", badgeKey: "approvals" },
   { key: "users", label: "Utilisateurs", icon: Users, roles: ["SUPER_ADMIN"], group: "admin" },
   { key: "prompts", label: "Prompts & modèles", icon: KeyRound, roles: ["SUPER_ADMIN"], group: "admin" },
   { key: "audit", label: "Audit", icon: ShieldCheck, roles: ["SUPER_ADMIN", "AUDITOR"], group: "admin" },
   { key: "embed", label: "Embed", icon: ClipboardCheck, roles: ["SUPER_ADMIN"], group: "admin" },
 ];
+
 
 function roleLabel(role: Role): string {
   switch (role) {
