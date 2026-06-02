@@ -185,85 +185,255 @@ export function LoginPage() {
               </div>
             </div>
 
-            <div className="mb-8">
-              <h1 className="font-display text-3xl font-semibold tracking-tight">Bon retour</h1>
+            <div className="mb-6">
+              <h1 className="font-display text-3xl font-semibold tracking-tight">
+                {mode === "signin" ? "Bon retour" : "Créer un compte consultant"}
+              </h1>
               <p className="mt-2 text-sm text-muted-foreground">
-                Connectez-vous avec votre compte de développement pour explorer l'interface.
+                {mode === "signin"
+                  ? "Connectez-vous avec votre compte pour explorer l'interface."
+                  : "Renseignez vos informations et choisissez votre manager pour activer votre accès."}
               </p>
             </div>
 
-            <form onSubmit={submit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email professionnel</Label>
-                <div className="relative">
-                  <Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    id="email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="h-11 pl-9"
-                    placeholder="vous@migso-pcubed.local"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="password">Mot de passe</Label>
-                  <button type="button" className="text-xs text-muted-foreground transition hover:text-primary">
-                    Mot de passe oublié ?
-                  </button>
-                </div>
-                <div className="relative">
-                  <LockKeyhole className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="h-11 pl-9"
-                    placeholder="••••••••"
-                    required
-                  />
-                </div>
-              </div>
-
-              <Button type="submit" disabled={loading} className="h-11 w-full text-sm font-medium shadow-glow">
-                {loading ? "Connexion en cours…" : (
-                  <>Se connecter <ArrowRight className="ml-1 size-4" /></>
-                )}
-              </Button>
-            </form>
-
-            <div className="my-6 flex items-center gap-3">
-              <div className="h-px flex-1 bg-border" />
-              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Comptes démo</p>
-              <div className="h-px flex-1 bg-border" />
+            {/* Mode toggle */}
+            <div className="mb-6 inline-flex w-full rounded-xl border border-border bg-muted/40 p-1 text-sm">
+              <button
+                type="button"
+                onClick={() => setMode("signin")}
+                className={`flex-1 rounded-lg px-3 py-2 font-medium transition ${
+                  mode === "signin" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Connexion
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("signup")}
+                className={`flex-1 rounded-lg px-3 py-2 font-medium transition ${
+                  mode === "signup" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Créer un compte
+              </button>
             </div>
 
-            <div className="grid gap-2">
-              {demoAccounts.map((acc) => (
-                <button
-                  key={acc.email}
-                  type="button"
-                  onClick={() => setEmail(acc.email)}
-                  className={`group flex items-center gap-3 rounded-xl border bg-card p-3 text-left transition hover:border-primary/40 hover:shadow-soft ${
-                    email === acc.email ? "border-primary/40 shadow-soft" : ""
-                  }`}
+            <AnimatePresence mode="wait">
+              {mode === "signin" ? (
+                <motion.form
+                  key="signin"
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.2 }}
+                  onSubmit={submit}
+                  className="space-y-4"
                 >
-                  <div className={`grid size-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br ${acc.color} text-white shadow-sm`}>
-                    <span className="text-xs font-semibold">{acc.role[0]}</span>
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email professionnel</Label>
+                    <div className="relative">
+                      <Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="email"
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        className="h-11 pl-9"
+                        placeholder="vous@migso-pcubed.local"
+                        required
+                      />
+                    </div>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{acc.role}</p>
-                    <p className="truncate text-xs text-muted-foreground">{acc.email}</p>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="password">Mot de passe</Label>
+                      <button type="button" className="text-xs text-muted-foreground transition hover:text-primary">
+                        Mot de passe oublié ?
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <LockKeyhole className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="password"
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="h-11 pl-9"
+                        placeholder="••••••••"
+                        required
+                      />
+                    </div>
                   </div>
-                  <ArrowRight className="size-4 text-muted-foreground opacity-0 transition group-hover:opacity-100" />
-                </button>
-              ))}
-            </div>
+
+                  <Button type="submit" disabled={loading} className="h-11 w-full text-sm font-medium shadow-glow">
+                    {loading ? "Connexion en cours…" : (
+                      <>Se connecter <ArrowRight className="ml-1 size-4" /></>
+                    )}
+                  </Button>
+
+                  <p className="pt-1 text-center text-xs text-muted-foreground">
+                    Pas encore de compte ?{" "}
+                    <button type="button" onClick={() => setMode("signup")} className="font-medium text-primary hover:underline">
+                      Créez votre compte consultant
+                    </button>
+                  </p>
+                </motion.form>
+              ) : (
+                <motion.form
+                  key="signup"
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.2 }}
+                  onSubmit={submitSignup}
+                  className="space-y-4"
+                >
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Nom complet</Label>
+                    <div className="relative">
+                      <UserIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="name"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        className="h-11 pl-9"
+                        placeholder="Prénom Nom"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="signup-email">Email professionnel</Label>
+                    <div className="relative">
+                      <Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="signup-email"
+                        type="email"
+                        value={signupEmail}
+                        onChange={(e) => setSignupEmail(e.target.value)}
+                        className="h-11 pl-9"
+                        placeholder="vous@migso-pcubed.local"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="signup-password">Mot de passe</Label>
+                    <div className="relative">
+                      <LockKeyhole className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="signup-password"
+                        type="password"
+                        value={signupPassword}
+                        onChange={(e) => setSignupPassword(e.target.value)}
+                        className="h-11 pl-9"
+                        placeholder="6 caractères minimum"
+                        minLength={6}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="department">Département (optionnel)</Label>
+                    <div className="relative">
+                      <Building2 className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="department"
+                        value={department}
+                        onChange={(e) => setDepartment(e.target.value)}
+                        className="h-11 pl-9"
+                        placeholder="Aerospace, Automotive…"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Votre manager</Label>
+                    {managers.length === 0 ? (
+                      <p className="rounded-lg border border-dashed border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+                        Chargement des managers… Si la liste reste vide, contactez votre super admin.
+                      </p>
+                    ) : (
+                      <div className="grid max-h-56 gap-2 overflow-y-auto pr-1">
+                        {managers.map((mgr) => {
+                          const sel = managerId === mgr.id;
+                          return (
+                            <button
+                              key={mgr.id}
+                              type="button"
+                              onClick={() => setManagerId(mgr.id)}
+                              className={`flex items-center gap-3 rounded-xl border p-3 text-left transition hover:border-primary/40 ${
+                                sel ? "border-primary/60 bg-primary/5 shadow-soft" : "border-border"
+                              }`}
+                            >
+                              <div className={`grid size-8 shrink-0 place-items-center rounded-lg ${sel ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                                <UserCheck className="size-4" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-medium">{mgr.name}</p>
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {mgr.department ?? "—"} · {mgr.email}
+                                </p>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <Button type="submit" disabled={loading || !managerId} className="h-11 w-full text-sm font-medium shadow-glow">
+                    {loading ? "Création en cours…" : (
+                      <>Créer mon compte <ArrowRight className="ml-1 size-4" /></>
+                    )}
+                  </Button>
+
+                  <p className="pt-1 text-center text-xs text-muted-foreground">
+                    Déjà un compte ?{" "}
+                    <button type="button" onClick={() => setMode("signin")} className="font-medium text-primary hover:underline">
+                      Connectez-vous
+                    </button>
+                  </p>
+                </motion.form>
+              )}
+            </AnimatePresence>
+
+            {mode === "signin" && (
+              <>
+                <div className="my-6 flex items-center gap-3">
+                  <div className="h-px flex-1 bg-border" />
+                  <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Comptes démo</p>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+
+                <div className="grid gap-2">
+                  {demoAccounts.map((acc) => (
+                    <button
+                      key={acc.email}
+                      type="button"
+                      onClick={() => setEmail(acc.email)}
+                      className={`group flex items-center gap-3 rounded-xl border bg-card p-3 text-left transition hover:border-primary/40 hover:shadow-soft ${
+                        email === acc.email ? "border-primary/40 shadow-soft" : ""
+                      }`}
+                    >
+                      <div className={`grid size-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br ${acc.color} text-white shadow-sm`}>
+                        <span className="text-xs font-semibold">{acc.role[0]}</span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{acc.role}</p>
+                        <p className="truncate text-xs text-muted-foreground">{acc.email}</p>
+                      </div>
+                      <ArrowRight className="size-4 text-muted-foreground opacity-0 transition group-hover:opacity-100" />
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
           </motion.div>
         </div>
       </section>
