@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { ApiClient } from "./api";
 import { authProvider } from "./auth/index";
 import type { Session } from "./types";
+import { setObservabilityUser } from "@/lib/observability";
 
 interface AuthContextValue {
   session: Session | null;
