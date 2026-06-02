@@ -365,7 +365,7 @@ export function ChatShell({ api, session }: { api: ApiClient; session: Session }
             {shownSources.length ? (
               <SourceCards sources={shownSources} onOpen={(c) => { setSourceViewer(c); setShowSources(false); }} />
             ) : (
-              <EmptyState title="Aucune source" description="Aucune base ou provider web disponible pour cette réponse." icon={<Database className="size-5" />} />
+              <EmptyState title="Aucune source" description="La base de connaissance n'a renvoyé aucun extrait au-dessus du seuil de pertinence (minRelevanceScore). Le Super Admin peut l'ajuster dans Prompts & modèles." icon={<Database className="size-5" />} />
             )}
           </ScrollArea>
         </SheetContent>
