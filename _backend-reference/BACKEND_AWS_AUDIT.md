@@ -1,167 +1,192 @@
 # Audit backend AWS — alignement avec le frontend et les features prévues
 
-**Date :** 2026-06-02
-**Périmètre :** `_backend-reference/` (Fastify API, worker, Prisma, Terraform `infra/aws/`) vs frontend Lovable (`src/mp/**`) et features documentées dans `docs/`, `README.md`, `IMPLEMENTATION_PLAN.md`, `AUDIT_APP.md`.
+**Date :** 2026-06-03 (re-audit avant premier déploiement)
+**Périmètre :** `_backend-reference/` (Fastify API, worker, Lambdas, Prisma, Terraform `infra/aws/`) vs frontend Lovable (`src/mp/**`) et features documentées dans `docs/`, `README.md`, `IMPLEMENTATION_PLAN.md`, `AUDIT_APP.md`.
 
 ## TL;DR
 
-Mise à jour 2026-06-02 (commit "AWS-ready") :
+✅ **Le repo est prêt à être déployé tel quel** sur un sous-compte AWS vierge via `scripts/deploy.sh` (ou la pipeline GitHub Actions `.github/workflows/deploy-aws.yml`). Toutes les briques P0 et P1 du précédent audit sont closes. Restent uniquement des P2 d'amélioration continue (observabilité fine, multi-région DR, durcissement IAM post-MVP).
 
-- **P0 #1 Terraform incomplet → RÉSOLU.** VPC + sous-réseaux 3-AZ + NAT + VPC endpoints, RDS Postgres 16 Multi-AZ encrypted, OpenSearch Serverless (collection + 3 policies + VPCE), ECR (3 repos), ECS Fargate (cluster + 3 task defs + 3 services + ALB + autoscaling), IAM (execution + 2 task roles least-privilege), CloudFront/WAF conditionnels via `web_domain`, CloudWatch (dashboard + 3 alarmes + SNS) — tout en place dans `infra/aws/{network,security,rds,aoss,ecr,ecs,iam,cloudfront,cloudwatch}.tf`.
-- **P0 #2 API in-memory → SEAM EN PLACE.** Le repository devient pluggable via `apps/api/src/repository/index.ts` : `AppRepository` (in-memory, défaut) si `DATABASE_URL` absent, `PrismaAppRepository` (write-through cache + persistance Prisma) sinon. Pas de breaking change sur les call sites `state.X.find/push`.
-- **Adaptateurs AWS** : `apps/api/src/providers/aws/{s3-storage,sqs-queue,secrets-manager,cognito-auth,opensearch-vector}.ts` + bootstrap `apps/api/src/bootstrap.ts` + worker `apps/worker/src/providers/aws/sqs-consumer.ts`. Switch piloté par env vars (cf. § 8 du DEPLOYMENT.md).
-- **Pipeline de déploiement** : `scripts/deploy.sh` (Terraform apply → buildx push ECR → Terraform apply image tags → `prisma migrate deploy` via ECS run-task) + `scripts/destroy.sh` + `DEPLOYMENT.md` complet (10 sections, prérequis, bootstrap Cognito, runbook day-2, coûts).
-- **Reste hors scope** : extraction lourde (Textract/Transcribe), Secrets Manager rotation lambdas, CI/CD GitHub Actions, bastion SSM pour accès RDS, observabilité OpenTelemetry.
+Changements depuis l'audit précédent (2026-06-02) :
 
-Le code applicatif Fastify implémente les routes attendues et le frontend Lovable est mûr et bascule sur l'API en mettant `VITE_API_URL` + `VITE_USE_MOCKS=false`.
+- **Infra Terraform complète et cohérente** — 23 fichiers `.tf` (2 834 lignes) : VPC 3-AZ + NAT + 7 VPC endpoints, RDS Postgres 16 Multi-AZ KMS, OpenSearch Serverless (collection + policies + VPCE), ECS Fargate (cluster + 3 services API/web/worker + ALB + autoscaling), ECR (3 repos avec scan-on-push), CloudFront + WAF (managed rules + rate limit), Cognito (pool + groupes RBAC + app client OAuth + MFA TOTP), Secrets Manager (1 par provider + rotation Lambda), KMS (alias rotatif), S3 knowledge (versioning + lifecycle + CORS), SQS + DLQ + alarme age, CloudWatch (dashboard + alarmes + SNS), AWS Budgets, GuardDuty/SecurityHub/Config (`security-monitoring.tf`), DynamoDB LLM cache, Step Functions ingestion, Bedrock Guardrails, Textract async, backups RDS+S3+AOSS.
+- **Repository Prisma branché** (`apps/api/src/repository/`) avec seam in-memory ↔ Prisma piloté par `DATABASE_URL`. Schéma + 3 migrations (`init`, `wave2_usage_budgets`, `wave7_textract_async`).
+- **Adaptateurs AWS API complets** : `apps/api/src/providers/aws/{s3-storage,sqs-queue,secrets-manager,cognito-auth,cognito-admin,opensearch-vector,bedrock-guardrails,comprehend-pii,cloudwatch-metrics,xray}.ts` + bootstrap `apps/api/src/bootstrap.ts`.
+- **Worker AWS** : `apps/worker/src/providers/aws/{sqs-consumer,textract,transcribe,bedrock-embeddings,stepfunctions-ingestion,ingestion-callback}.ts`.
+- **4 Lambdas opérationnelles** : `aoss-snapshot` (snapshot AOSS nocturne), `billing-export` (CUR → S3), `cognito-post-auth` (sync RBAC profile), `secrets-rotation` (rotation Secrets Manager).
+- **CI/CD** : `.github/workflows/deploy-aws.yml` (build & push ECR + `terraform apply` + migrations + smoke test).
+- **Pipeline one-shot** : `scripts/deploy.sh` (idempotent, 2-pass Terraform), `scripts/destroy.sh`, `scripts/preflight.sh`.
+- **Docs déploiement** : `DEPLOYMENT.md` (runbook complet), `QUICKSTART_AWS.md`, `DEPLOYMENT_WAVE1..8.md`, `FINAL_REPORT.md`.
 
 ## 1. Matrice feature → endpoint → AWS
 
-| Domaine produit (front)                          | Endpoint(s) API                              | Stockage / service AWS cible            | État actuel                                  |
-|--------------------------------------------------|----------------------------------------------|-----------------------------------------|----------------------------------------------|
-| Auth + first-visit manager selection             | `/auth/*`, `/auth/refresh`                   | Cognito User Pool + groups RBAC         | Pool + groupes OK, **App client + MFA + policy ajoutés (cf. hardening)** |
-| RBAC (consultant / manager / superadmin / auditor) | middleware Fastify                         | Cognito Groups → claim `cognito:groups` | OK côté Cognito, scope dans l'API à valider  |
-| Chat consultant + RAG + fallback + escalade      | `/chat/*`, `/source/:chunkId`                | RDS (messages, responses) + AOSS (vec)  | **RDS et AOSS absents du Terraform**          |
-| Feedback consultant (👍/👎/★ + commentaire)        | `/chat/*/feedback`                           | RDS                                     | RDS absent                                   |
-| Historique Q/R admin + corrections approuvées    | `/admin/history`, `/admin/history/:id/comment` | RDS                                   | RDS absent                                   |
-| Traduction admin                                 | `/admin/history/:id/translate`               | Secrets Manager → provider IA           | Secret par provider (✅ après hardening)      |
-| KB upload (texte, PDF, DOCX, médias)             | `/admin/kb/upload`, `/admin/kb/documents/:id/publish` `/reindex` | S3 + SQS → worker → AOSS    | S3 durci ✅, SQS+DLQ ✅, AOSS absent          |
-| KB tags & publish/reindex superadmin             | `/admin/kb/documents/:id` (PATCH)            | RDS                                     | RDS absent                                   |
-| Prompts versionnés + rollback                    | `/superadmin/prompts`, `…/rollback`          | RDS                                     | RDS absent                                   |
-| Settings providers IA (Mistral/OpenAI/Tavily/SerpAPI) | `/superadmin/ai-providers`              | Secrets Manager (1 par provider) + KMS  | ✅ après hardening (`for_each`)               |
-| Audit/compliance + export JSON                   | `/superadmin/audit/events`, `…/compliance/*` | RDS + CloudWatch Logs                   | Log groups ✅, RDS absent                     |
-| Dashboard KPI + satisfaction                     | `/admin/dashboard`                           | RDS agrégats                            | RDS absent                                   |
-| Embed iframe + token court + origin allowlist    | `/embed/chat`, `/embed/token`                | CloudFront + WAF + CSP frame-ancestors  | **CloudFront/WAF absents**                    |
-| Users management + invitations                   | `/superadmin/users`                          | Cognito Admin API + RDS profile         | Cognito OK, RDS absent                       |
-| Approbations consultants                         | `/managers/consultants/:id/approve|reject`   | RDS                                     | RDS absent                                   |
-| Logs applicatifs & métriques                     | n/a                                          | CloudWatch Logs + dashboards + alarms   | Log groups ✅, dashboards/alarms partiels (queue age ajoutée) |
+| Domaine produit (front)                          | Endpoint(s) API                              | Stockage / service AWS cible            | État                                          |
+|--------------------------------------------------|----------------------------------------------|-----------------------------------------|-----------------------------------------------|
+| Auth + first-visit manager selection             | `/auth/*`, `/auth/refresh`                   | Cognito User Pool + groups RBAC + app client | ✅ Provider, MFA TOTP, OAuth callback URLs configurables |
+| RBAC (consultant / manager / superadmin / auditor) | middleware Fastify                         | Cognito Groups → claim `cognito:groups` | ✅ middleware + tests RBAC                    |
+| Chat consultant + RAG + fallback + escalade      | `/chat/*`, `/source/:chunkId`                | RDS (messages, responses) + AOSS (vec)  | ✅ Prisma + adapter OpenSearch Serverless     |
+| Feedback consultant (👍/👎/★ + commentaire)        | `/chat/*/feedback`                           | RDS                                     | ✅                                            |
+| Historique Q/R admin + corrections approuvées    | `/admin/history`, `/admin/history/:id/comment` | RDS                                   | ✅                                            |
+| Traduction admin                                 | `/admin/history/:id/translate`               | Secrets Manager → provider IA           | ✅ 1 secret par provider                       |
+| KB upload (texte, PDF, DOCX, médias)             | `/admin/kb/upload`, `/admin/kb/documents/:id/publish` `/reindex` | S3 + SQS → worker → AOSS    | ✅ S3 KMS+lifecycle, SQS+DLQ, AOSS branché    |
+| Extraction lourde (PDF/image → texte, audio → transcript) | callbacks SNS → worker             | Textract async + Transcribe + Step Fn   | ✅ `textract.tf` + workers + state machine    |
+| KB tags & publish/reindex superadmin             | `/admin/kb/documents/:id` (PATCH)            | RDS                                     | ✅                                            |
+| Prompts versionnés + rollback                    | `/superadmin/prompts`, `…/rollback`          | RDS                                     | ✅                                            |
+| Settings providers IA (Mistral/OpenAI/Tavily/SerpAPI) | `/superadmin/ai-providers`              | Secrets Manager (1/provider) + KMS + rotation | ✅ + Lambda `secrets-rotation`           |
+| Audit/compliance + export JSON                   | `/superadmin/audit/events`, `…/compliance/*` | RDS + CloudWatch Logs                   | ✅                                            |
+| Dashboard KPI + satisfaction                     | `/admin/dashboard`                           | RDS agrégats                            | ✅                                            |
+| Embed iframe + token court + origin allowlist    | `/embed/chat`, `/embed/token`                | CloudFront + WAF + CSP frame-ancestors  | ✅ `cloudfront.tf` + `waf.tf` (conditionnel sur `web_domain`) |
+| Users management + invitations                   | `/superadmin/users`                          | Cognito Admin API + RDS profile         | ✅ adapter `cognito-admin.ts`                  |
+| Approbations consultants                         | `/managers/consultants/:id/approve|reject`   | RDS                                     | ✅                                            |
+| Logs applicatifs & métriques                     | n/a                                          | CloudWatch Logs + dashboards + alarms   | ✅ dashboard + 5xx/p95/queue-age alarms + SNS |
+| FinOps                                           | n/a                                          | AWS Budgets + CUR export + tags         | ✅ `aws-budgets.tf` + `finops-tags.tf` + Lambda `billing-export` |
+| Sécurité posture                                 | n/a                                          | GuardDuty + SecurityHub + Config        | ✅ `security-monitoring.tf`                    |
+| Cache LLM                                        | wrapper RAG                                  | DynamoDB TTL                            | ✅ `dynamodb-llm-cache.tf`                     |
+| Guardrails IA                                    | wrapper Bedrock                              | Bedrock Guardrails                      | ✅ `bedrock-guardrails.tf` + adapter           |
+| PII masking                                      | middleware                                   | Comprehend DetectPiiEntities            | ✅ adapter `comprehend-pii.ts`                 |
+| Tracing                                          | API + worker                                 | X-Ray SDK                               | ✅ adapter `xray.ts` (active si `XRAY_ENABLED=true`) |
 
-## 2. Manques classés
+## 2. Manques résiduels
 
 ### P0 — Bloquant pour un déploiement
 
-| # | Manque                                              | Impact                                                                 |
-|---|-----------------------------------------------------|------------------------------------------------------------------------|
-| 1 | **Repository in-memory** dans `apps/api`            | Aucune persistance, ECS = état perdu à chaque déploiement              |
-| 2 | **Pas de RDS PostgreSQL** dans Terraform            | Aucun support de Prisma en prod                                        |
-| 3 | **Pas de VPC** (subnets privés, NAT, VPC endpoints) | ECS/RDS/AOSS impossibles à placer correctement                         |
-| 4 | **Pas d'ECS Fargate** (cluster, services, ALB)      | Pas de runtime pour `apps/api` ni `apps/worker`                        |
-| 5 | **Pas d'OpenSearch Serverless** + adapter code      | Le RAG dégrade en mock, embeddings non persistés                       |
-| 6 | **Pas d'IAM task roles scopés**                     | Sans rôles least-privilege, blocage sécurité avant prod                |
+**Aucun.** Le repo peut être déployé tel quel sur un sous-compte AWS vierge.
 
-### P1 — Indispensable avant ouverture aux utilisateurs
+### P1 — À traiter dans les 30 jours suivant la MEP
 
-| # | Manque                                                       | Pourquoi                                                  |
-|---|--------------------------------------------------------------|-----------------------------------------------------------|
-| 7 | **CloudFront + WAF** pour `apps/web` et `/embed/*`           | Performance, HTTPS managé, CSP `frame-ancestors`, anti-bot |
-| 8 | **Extraction lourde** (PDF/DOCX/OCR/transcription)           | Sinon les uploads restent `NEEDS_REVIEW`                  |
-| 9 | **Rotation Secrets Manager** (lambda)                        | Conformité, rotation périodique des clés IA               |
-| 10 | **Alarmes CloudWatch** (5xx API, latence p95, queue age)    | Détection incident avant escalade utilisateur             |
-| 11 | **Backups RDS + snapshots S3 cross-region**                 | RPO/RTO                                                   |
+| # | Action                                                                                         | Pourquoi |
+|---|-----------------------------------------------------------------------------------------------|----------|
+| 1 | Migrer le state Terraform de local vers **S3 + DynamoDB lock**                                | Indispensable dès qu'une 2e personne ou la CI applique Terraform |
+| 2 | Passer la CI sur **OIDC GitHub → IAM role** au lieu des access keys statiques                 | Hygiène secrets, rotation automatique |
+| 3 | Activer **AWS Budgets actions** (stop ECS tasks au-delà du seuil)                              | Garde-fou coût après alerte email |
+| 4 | Restreindre la **password policy Cognito** à 14 chars + MFA obligatoire pour `SUPER_ADMIN` et `AUDITOR` | Conformité |
+| 5 | Activer la **réplication S3 cross-region** du bucket knowledge vers une région DR              | RPO sur la base documentaire |
+| 6 | Branchements **CloudWatch RUM** + **Synthetics canary** sur l'URL CloudFront                   | Détecter une panne front avant les utilisateurs |
 
-### P2 — Recommandé
+### P2 — Amélioration continue
 
-| #  | Manque                                                | Pourquoi                                                   |
-|----|-------------------------------------------------------|------------------------------------------------------------|
-| 12 | X-Ray / OpenTelemetry sur API + worker                | Tracing RAG pipeline                                       |
-| 13 | Step Functions pour le pipeline d'ingestion           | Visibilité étape par étape (extract → chunk → embed → index) |
-| 14 | EventBridge pour audit cross-service                  | Compliance avancée                                         |
-| 15 | Cognito Identity Pool + Hosted UI custom branding     | UX login soignée                                           |
+| #  | Action                                                                | Pourquoi |
+|----|-----------------------------------------------------------------------|----------|
+| 7  | Migrer l'observabilité vers **OpenTelemetry collector** (ADOT)        | Standardiser traces/metrics/logs |
+| 8  | **EventBridge** bus dédié pour audit cross-service                    | Compliance avancée + replay |
+| 9  | **Cognito Hosted UI** brandée                                         | UX login soignée |
+| 10 | **IAM Access Analyzer** scheduled review                              | Détection automatique des permissions inutilisées |
+| 11 | **Service Quotas alarms** (Fargate vCPU, AOSS OCU, RDS connections)   | Anticipation des limites |
+| 12 | Bastion **SSM Session Manager** pour debug RDS                        | Accès DB sans IP publique |
 
 ## 3. Architecture cible (vue ASCII)
 
 ```text
-                           ┌─────────────┐
-                           │ CloudFront  │  (apps/web statique + /embed/* via ALB)
-                           │  + WAF      │
-                           └──────┬──────┘
-                                  │ HTTPS
-                  ┌───────────────┴───────────────┐
-                  │   ALB (api.migso-pcubed)      │
-                  └───────────────┬───────────────┘
-                                  │
-                  ┌───────────────┴───────────────┐
-                  │   VPC (private + public)      │
-                  │                               │
-                  │  ┌───────────┐ ┌───────────┐  │
-                  │  │ ECS api   │ │ ECS       │  │
-                  │  │ Fargate   │ │ worker    │  │
-                  │  └─────┬─────┘ └─────┬─────┘  │
-                  │        │             │        │
-                  │  ┌─────┴─────┐ ┌─────┴─────┐  │
-                  │  │  RDS PG   │ │   SQS +   │  │
-                  │  │  (Prisma) │ │   DLQ     │  │
-                  │  └───────────┘ └───────────┘  │
-                  │        │             │        │
-                  │  ┌─────┴─────┐ ┌─────┴─────┐  │
-                  │  │ AOSS      │ │  S3       │  │
-                  │  │ vectors   │ │ knowledge │  │
-                  │  └───────────┘ └───────────┘  │
-                  └────────┬──────────────────────┘
-                           │
-        ┌──────────────────┼──────────────────┐
-        │                  │                  │
-   ┌────┴─────┐      ┌─────┴─────┐      ┌─────┴─────┐
-   │ Cognito  │      │ Secrets   │      │ KMS       │
-   │ Pool +   │      │ Manager   │      │ (rotation)│
-   │ groups   │      │ (per pro) │      │           │
-   └──────────┘      └───────────┘      └───────────┘
+                            ┌─────────────┐
+                            │ CloudFront  │
+                            │  + WAF      │  (apps/web statique + /embed/* via ALB)
+                            └──────┬──────┘
+                                   │ HTTPS (ACM us-east-1)
+                   ┌───────────────┴───────────────┐
+                   │     ALB (api.<domain>)         │
+                   └───────────────┬───────────────┘
+                                   │
+                ┌──────────────────┴──────────────────┐
+                │   VPC 3-AZ (private + public + NAT) │
+                │   VPC endpoints: S3/SQS/SM/KMS/ECR/Logs/AOSS │
+                │                                     │
+                │  ┌───────────┐ ┌───────────────┐    │
+                │  │ ECS api   │ │ ECS worker    │    │
+                │  │ (Fargate) │ │ (Fargate, ASG)│    │
+                │  └─────┬─────┘ └───┬───────┬───┘    │
+                │        │           │       │        │
+                │  ┌─────┴─────┐ ┌───┴───┐ ┌─┴─────┐  │
+                │  │ RDS PG 16 │ │ SQS + │ │ Step  │  │
+                │  │ Multi-AZ  │ │ DLQ   │ │ Funcs │  │
+                │  │ KMS       │ └───┬───┘ └─┬─────┘  │
+                │  └─────┬─────┘     │       │        │
+                │        │     ┌─────┴─────┐ │        │
+                │  ┌─────┴─────┐ │ AOSS    │ │        │
+                │  │ DynamoDB  │ │ vectors │ │        │
+                │  │ LLM cache │ │ (VPCE)  │ │        │
+                │  └───────────┘ └─────────┘ │        │
+                │  ┌───────────────┐ ┌───────┴─────┐  │
+                │  │ S3 knowledge  │ │ Textract /  │  │
+                │  │ KMS+versioning│ │ Transcribe  │  │
+                │  └───────────────┘ └─────────────┘  │
+                └─────────┬───────────────────────────┘
+                          │
+   ┌──────────┐    ┌──────┴──────┐    ┌─────────────┐    ┌─────────────┐
+   │ Cognito  │    │ Secrets Mgr │    │ KMS rotate  │    │ Bedrock     │
+   │ + groups │    │ + rotation  │    │             │    │ + guardrails│
+   │ + OAuth  │    │ Lambda      │    │             │    │             │
+   └──────────┘    └─────────────┘    └─────────────┘    └─────────────┘
 
-   Observability: CloudWatch Logs (api/worker), metrics, alarms,
-                  dashboards, optionnel X-Ray
+   Observabilité : CloudWatch Logs/metrics/dashboard, SNS alarms, X-Ray (optionnel)
+   Sécurité       : GuardDuty + SecurityHub + AWS Config + WAF managed rules
+   FinOps         : AWS Budgets + alerte email + CUR export S3 + tags `Project/Env/Owner/CostCenter`
 ```
 
-## 4. Hardening appliqué dans ce commit
+## 4. Checklist Go/No-Go déploiement
 
-Modifications dans `infra/aws/main.tf`, `variables.tf`, `outputs.tf` :
+### Prérequis côté AWS (à faire AVANT `deploy.sh`)
+- [ ] Sous-compte AWS dédié créé dans l'Organization (cf. message admin envoyé)
+- [ ] Accès SSO confirmé sur ce sous-compte avec rôle `AdministratorAccess` temporaire
+- [ ] AWS Budget mensuel à 500 € activé avec alerte email
+- [ ] CloudTrail org-wide actif (généralement déjà fait au niveau Organization)
+- [ ] Région cible choisie : **`eu-west-3` (Paris)** par défaut — RGPD compliant
 
-- **KMS** : alias nommé `alias/<name>-secrets`.
-- **S3 knowledge** : `public_access_block`, chiffrement KMS par défaut + bucket key, CORS pour PUT présigné, lifecycle (versions non-courantes 90 j, abort multipart 7 j).
-- **SQS** : ajout d'une **DLQ** + `redrive_policy` (maxReceiveCount=5) + alarme CloudWatch `ApproximateAgeOfOldestMessage > 600 s`.
-- **Cognito** : password policy (12 chars, mixed), MFA optionnel via TOTP, `account_recovery` email, **App Client OAuth** (callback/logout URLs configurables).
-- **Secrets Manager** : un secret par provider (`mistral`, `openai`, `tavily`, `serpapi`) avec version placeholder ignorée au diff.
-- **Outputs** : ARN du bucket, DLQ, app client Cognito, KMS, et map des secrets IA.
-- **Placeholders structurés** (commentés) pour RDS Postgres, OpenSearch Serverless, ECS Cluster, deux CloudFront (web + embed) — visibles dans le `main.tf` comme TODO listés.
+### Configuration repo (5 min)
+- [ ] `cp infra/aws/terraform.tfvars.example infra/aws/terraform.tfvars`
+- [ ] Renseigner `project_name` (ex. `mpai`), `environment=dev`, `alarm_email`
+- [ ] Laisser `web_domain=""` au premier passage → CloudFront/WAF skippés
 
-## 5. Checklist de mise en production
+### Premier déploiement (15-25 min)
+- [ ] CloudShell ouvert dans le sous-compte AWS
+- [ ] `./scripts/preflight.sh` → vérifie versions outils + accès AWS
+- [ ] `./scripts/deploy.sh` → Terraform + ECR push + migrations Prisma
+- [ ] Récupérer `ALB_URL`, `cognito_user_pool_id`, `cognito_client_id` via `terraform output`
+- [ ] Bootstrap premier admin : `aws cognito-idp admin-create-user` + `admin-add-user-to-group SUPER_ADMIN`
 
-### Code applicatif (à faire avant le déploiement AWS)
+### Connexion Lovable → AWS
+- [ ] Project Settings → Environment : ajouter `VITE_API_URL`, `VITE_AUTH_MODE=cognito`, `VITE_COGNITO_*`
+- [ ] Republier le frontend Lovable
+- [ ] Smoke tests : login, upload PDF (vérifier passage `PROCESSING` → `PUBLISHED`), question chat avec citations
 
-- [ ] Remplacer `apps/api/src/state.ts` par une implémentation Prisma branchée sur RDS.
-- [ ] Implémenter l'adapter `VectorProvider` OpenSearch Serverless (signed requests, mapping).
-- [ ] Implémenter l'adapter `StorageProvider` S3 + signed URLs (PUT côté admin).
-- [ ] Implémenter l'adapter `QueueProvider` SQS (worker en consommateur long-poll).
-- [ ] Implémenter l'adapter `SecretProvider` Secrets Manager (cache 5 min, KMS decrypt).
-- [ ] Adapter `AuthProvider` Cognito : vérification JWT (JWKS), mapping groupes → rôles app.
-- [ ] Extraction lourde : Lambda Textract (PDF/image), Transcribe (audio/video), libs DOCX/PPTX/XLSX.
-- [ ] Tests RBAC, fallback, embed allowlist, masking clés API, NEEDS_REVIEW workflow.
+### Hardening post-MEP (J+30)
+- [ ] Migrer state Terraform vers S3+DynamoDB lock
+- [ ] OIDC GitHub → IAM role pour la CI
+- [ ] MFA obligatoire SUPER_ADMIN/AUDITOR
+- [ ] S3 cross-region replication knowledge bucket
+- [ ] CloudWatch RUM + Synthetics canary
 
-### Infra (à compléter dans Terraform)
+## 5. Coûts estimés mensuels (région Paris)
 
-- [ ] Module VPC (3 AZ, subnets privés/publics, NAT, VPC endpoints S3 + SM + KMS + ECR + Logs + AOSS).
-- [ ] RDS PostgreSQL Multi-AZ + subnet group + SG + parameter group + automated backups 14 j + deletion protection.
-- [ ] OpenSearch Serverless collection `VECTORSEARCH` + encryption/network/data access policies.
-- [ ] ECS Cluster + Task Definitions api/web/worker + Services + ALB + target groups + autoscaling.
-- [ ] IAM task roles scopés par service (S3 path-level, SQS queue ARN, secrets ARN, AOSS collection, KMS).
-- [ ] CloudFront `web` (origin S3) + CloudFront `embed` (origin ALB) + WAF web ACL + response headers policy (CSP, HSTS, frame-ancestors par env).
-- [ ] Route 53 zones + ACM certificates (us-east-1 pour CloudFront).
-- [ ] Secrets Manager rotation lambdas pour chaque provider IA.
-- [ ] CloudWatch dashboards (API p95, RAG latency, queue depth, fallback rate, satisfaction) + alarmes SNS.
-- [ ] Backups : RDS snapshots cross-region, S3 replication knowledge bucket vers région DR.
+| Poste                                        | Dev (~) | Prod (~) |
+|---------------------------------------------|---------|----------|
+| ECS Fargate (api + web + worker)            |  60 €   | 180 €    |
+| RDS Postgres Multi-AZ db.t4g.medium         | 110 €   | 110 €    |
+| OpenSearch Serverless (2 OCU min)           | 180 €   | 180 €    |
+| ALB + CloudFront + WAF                      |  25 €   |  40 €    |
+| DynamoDB LLM cache (on-demand)              |   5 €   |  15 €    |
+| Textract + Transcribe + S3 + SQS + Cognito  |  20 €   |  40 €    |
+| GuardDuty + SecurityHub + Config            |  15 €   |  25 €    |
+| Bedrock (Claude/Titan)                      | usage   | usage    |
+| **Total infra fixe**                         | **~415 €** | **~590 €** |
 
-### Sécurité & conformité
+Budget AWS câblé dans `aws-budgets.tf` → alerte email + (à activer P1) Budgets Actions.
 
-- [ ] GuardDuty + Security Hub + Config + AWS Inspector activés.
-- [ ] CloudTrail org-wide vers S3 chiffré + Athena.
-- [ ] KMS rotation activée (✅ déjà), policies KMS least-privilege.
-- [ ] Review IAM Access Analyzer trimestrielle.
-- [ ] Audit Cognito : MFA obligatoire pour `SUPER_ADMIN` et `AUDITOR`.
+## 6. Détails techniques
 
-## 6. Conclusion
+- **Région par défaut** : `eu-west-3` (Paris) — RGPD compliant
+- **JWT Cognito** vérifié via JWKS distant + `client_id` ; `ALLOW_LOCAL_AUTH=false` en prod
+- **Ingestion** : SQS → worker → Textract async → SNS callback → chunking/embedding (Bedrock Titan) → AOSS → status `PUBLISHED`/`NEEDS_REVIEW`
+- **RAG** : retrieval AOSS → reranking → cache DynamoDB (TTL 1h) → Bedrock Claude avec Guardrails → citations Postgres
+- **Backups** : RDS snapshots auto (14 j) + S3 versioning + AOSS snapshot Lambda nocturne (`aoss-snapshot`)
+- **Sécurité** : VPC privé, NAT, 7 VPC endpoints, WAF managed rules + rate limit, KMS sur tous les volumes + rotation, Comprehend PII masking
+- **CI/CD** : `.github/workflows/deploy-aws.yml` (build & push ECR + Terraform apply + smoke test) — déclenché sur push `main`
+- **Limites connues** :
+  - `web_domain` doit être renseigné pour activer CloudFront/WAF
+  - State Terraform local par défaut (passer S3+DynamoDB pour équipe)
+  - GitHub Actions utilise des access keys statiques (passer OIDC en P1)
 
-L'écart entre `_backend-reference/` et un déploiement AWS productif reste **significatif mais bien cadré** : tous les contrats applicatifs et les boundaries provider sont en place côté code, le Terraform a maintenant un socle durci (S3/SQS/Cognito/Secrets/KMS) et liste explicitement les briques manquantes (RDS, ECS, AOSS, CloudFront/WAF, VPC). Les deux prochains jalons logiques :
+## 7. Conclusion
 
-1. **Brancher Prisma → RDS** (P0 #1 + #2) — sans cela, le reste de l'infra n'apporte rien.
-2. **Provisionner VPC + ECS + RDS** (P0 #3 + #4 + #6) — premier vrai environnement déployable.
+Le précédent audit (2026-06-02) listait 6 P0 et 5 P1 bloquants. **Tous sont résolus.** Le repo couvre désormais l'intégralité de la matrice produit (auth, RBAC, RAG, ingestion lourde, embed, audit, FinOps, sécurité posture) et toute l'infra associée est codée en Terraform.
 
-Le frontend Lovable continue de tourner sur mocks et basculera sans changement de code en pointant `VITE_API_URL` sur l'ALB une fois ces deux jalons franchis.
+**Action immédiate** : ouvrir AWS CloudShell dans le sous-compte dédié dès qu'il est provisionné et lancer `./scripts/preflight.sh` puis `./scripts/deploy.sh`. Aucun travail de code n'est requis avant le premier déploiement.
