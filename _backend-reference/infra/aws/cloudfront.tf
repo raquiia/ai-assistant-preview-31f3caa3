@@ -1,10 +1,17 @@
 # ---------------------------------------------------------------------------
-# CloudFront + WAF — only created when a domain is configured.
-# When var.web_domain == "" the ALB is the public entrypoint.
+# CloudFront + WAF.
+# - var.enable_cloudfront = false → skipped, ALB is the public entrypoint
+# - var.enable_cloudfront = true + var.web_domain = ""  → CloudFront with default *.cloudfront.net cert
+# - var.enable_cloudfront = true + var.web_domain set   → CloudFront with custom domain + ACM cert
 # ---------------------------------------------------------------------------
 
+locals {
+  cf_enabled    = var.enable_cloudfront
+  cf_has_domain = var.enable_cloudfront && var.web_domain != ""
+}
+
 resource "aws_wafv2_web_acl" "main" {
-  count    = var.web_domain == "" ? 0 : 1
+  count    = local.cf_enabled ? 1 : 0
   provider = aws.us_east_1
   name     = "${local.name}-waf"
   scope    = "CLOUDFRONT"
@@ -59,7 +66,7 @@ resource "aws_wafv2_web_acl" "main" {
 }
 
 resource "aws_cloudfront_response_headers_policy" "secure" {
-  count = var.web_domain == "" ? 0 : 1
+  count = local.cf_enabled ? 1 : 0
   name  = "${local.name}-secure-headers"
 
   security_headers_config {
@@ -89,10 +96,10 @@ resource "aws_cloudfront_response_headers_policy" "secure" {
 }
 
 resource "aws_cloudfront_distribution" "web" {
-  count   = var.web_domain == "" ? 0 : 1
-  enabled = true
-  comment = "${local.name} web"
-  aliases = [var.web_domain]
+  count      = local.cf_enabled ? 1 : 0
+  enabled    = true
+  comment    = "${local.name} web"
+  aliases    = local.cf_has_domain ? [var.web_domain] : []
   web_acl_id = aws_wafv2_web_acl.main[0].arn
 
   origin {
@@ -107,11 +114,11 @@ resource "aws_cloudfront_distribution" "web" {
   }
 
   default_cache_behavior {
-    target_origin_id       = "alb"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
-    cached_methods         = ["GET", "HEAD"]
-    compress               = true
+    target_origin_id           = "alb"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods             = ["GET", "HEAD"]
+    compress                   = true
     response_headers_policy_id = aws_cloudfront_response_headers_policy.secure[0].id
 
     forwarded_values {
@@ -121,10 +128,20 @@ resource "aws_cloudfront_distribution" "web" {
     }
   }
 
-  viewer_certificate {
-    acm_certificate_arn      = var.cloudfront_certificate_arn
-    minimum_protocol_version = "TLSv1.2_2021"
-    ssl_support_method       = "sni-only"
+  dynamic "viewer_certificate" {
+    for_each = local.cf_has_domain ? [1] : []
+    content {
+      acm_certificate_arn      = var.cloudfront_certificate_arn
+      minimum_protocol_version = "TLSv1.2_2021"
+      ssl_support_method       = "sni-only"
+    }
+  }
+
+  dynamic "viewer_certificate" {
+    for_each = local.cf_has_domain ? [] : [1]
+    content {
+      cloudfront_default_certificate = true
+    }
   }
 
   restrictions {
@@ -140,3 +157,4 @@ provider "aws" {
   alias  = "us_east_1"
   region = "us-east-1"
 }
+
