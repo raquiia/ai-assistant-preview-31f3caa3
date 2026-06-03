@@ -1,84 +1,139 @@
-# Plan — JWT Cognito + mapping `cognito:groups` → rôles pour la KB
 
-## Objectif
-Toutes les routes protégées (et **prioritairement les actions Knowledge Base**) acceptent un access token Cognito, valident sa signature contre le JWKS de la User Pool, mappent `cognito:groups` au rôle applicatif, et autorisent l'action seulement si le rôle correspond — sans casser le mode local (HMAC) qui sert au dev.
+# Déploiement AWS — Vérification & Marche à suivre
 
-## État actuel
-- `CognitoAuthProvider.verify()` : OK — vérifie issuer, JWKS, `client_id` / `aud`, `token_use`, et calcule `role` depuis `cognito:groups` par priorité (`SUPER_ADMIN > MANAGER > AUDITOR > CONSULTANT`). ✅
-- `jitProvisionUser()` : OK — crée la `User` row sur première connexion et resynchronise le `role` si le groupe change. ✅
-- Route `GET /me` : OK — vérifie Cognito + JIT-provision. ✅
-- Infra Terraform : User Pool, 4 groupes (`CONSULTANT`/`MANAGER`/`SUPER_ADMIN`/`AUDITOR`), App Client web. ✅
-- ❌ **Trou de sécurité** : `function auth(repo)` (preHandler partagé par TOUS les `/admin/kb/*`, `/superadmin/*`, `/chat/*`, etc.) n'appelle que `verifyToken(... "access")` — **le token HMAC local**. En prod avec Cognito branché, un client qui présente un bearer Cognito reçoit 401, et inversement un attaquant pourrait théoriquement forger un HMAC si la clé locale fuit. Aucune route protégée ne passe par `cognitoAuth.verify`.
-- ❌ Pas de `requireRole(...)` central : les routes KB font `if (!canUploadKnowledge(actor)) reply.code(403)` au cas par cas, parfois oublié.
-- ❌ Frontend `cognitoProvider` envoie déjà le Bearer Cognito, mais le backend le rejette dès qu'il sort de `/me`.
-- ❌ Pas de cache des claims : chaque requête refait la vérif JWKS (jose la cache déjà 10 min en interne, OK), mais on relookup `User` à chaque requête sans cache.
+## 1. Vérification "tout est sur GitHub"
 
-## Découpage
+Le repo contient déjà tout ce qu'il faut pour partir en production. Inventaire :
 
-### 1. Vérificateur hybride côté API
-- Extraire le préHandler dans `src/security/authMiddleware.ts` :
-  - Si `cognitoAuth` est instancié → tenter `cognitoAuth.verify(header)` d'abord ; si succès, JIT-provision et `request.actor = user`.
-  - Sinon, ou si le token n'est pas un JWT Cognito valide (fallback explicite contrôlé par flag `ALLOW_LOCAL_AUTH=true`, défaut **false en prod**) → `verifyToken(... "access")` local.
-  - Toujours rejeter 401 si rien n'aboutit ; loguer la raison sans fuir d'info.
-- Mettre en place un **cache LRU de claims** (clé = `kid+jti` ou hash du token, TTL = exp - now, max 1000 entrées) pour éviter la re-vérif sur chaque requête courte.
+**Infrastructure as Code** — `_backend-reference/infra/aws/` (24 fichiers Terraform)
+- Réseau : `network.tf`, `vpc-endpoints.tf`, `security.tf`, `waf.tf`, `cloudfront.tf`
+- Compute : `ecs.tf`, `ecs-autoscaling.tf`, `ecr.tf`
+- Données : `rds.tf` (Postgres Multi-AZ), `aoss.tf` (OpenSearch Serverless), `dynamodb-llm-cache.tf`, `backups.tf`
+- IA / Ingestion : `textract.tf` (Wave 7), `bedrock-guardrails.tf`, `stepfunctions/ingestion.asl.json`
+- Sécurité : `iam.tf`, Cognito dans `main.tf`, `security-monitoring.tf`
+- FinOps & Obs : `aws-budgets.tf`, `finops-tags.tf`, `cloudwatch.tf`, `logs.tf`
 
-### 2. RBAC explicite sur les KB endpoints
-- Ajouter dans `@mp/shared/rbac`:
-  - `canReadKnowledge(actor)` → `SUPER_ADMIN | MANAGER | AUDITOR`.
-  - `canManageKnowledge(actor)` (alias `canUploadKnowledge`, plus parlant pour publish/reindex/archive).
-- Créer `requireRole(...roles: Role[])` factory dans `authMiddleware.ts` → preHandler Fastify qui renvoie 403 + audit `ACCESS_DENIED`.
-- Re-câbler les routes :
-  - `POST /admin/kb/upload` → `[auth, requireRole("SUPER_ADMIN")]`.
-  - `POST /admin/kb/documents/:id/publish` → `[auth, requireRole("SUPER_ADMIN")]`.
-  - `POST /admin/kb/documents/:id/reindex` → `[auth, requireRole("SUPER_ADMIN")]`.
-  - `GET  /admin/kb/documents[/:id]` → `[auth, requireRole("SUPER_ADMIN", "MANAGER", "AUDITOR")]`.
-  - `GET  /admin/kb/documents/:id/execution` → idem lecture.
-- Supprimer les `if (!canUploadKnowledge…)` redondants une fois le middleware en place (defense in depth conservée pour les checks fins, ex. `canViewConversation`).
+**Applications conteneurisées** — `_backend-reference/apps/`
+- `api/` (Fastify + Dockerfile) — JWT Cognito + RBAC (Wave 8) ✅
+- `worker/` (SQS consumers + Textract/Transcribe callbacks) ✅
+- `web/` (build de référence + nginx) ✅
+- `lambda/` (4 fonctions : aoss-snapshot, billing-export, cognito-post-auth, secrets-rotation) ✅
 
-### 3. JIT provisioning durci
-- Bloquer la JIT-création si `claims.email` est absent ou non vérifié (`email_verified !== true`) → 401 `email_not_verified` (corrige un bypass possible si Cognito émet un token id sans email vérifié).
-- Forcer la resynchro **descendante** : si l'utilisateur est retiré de tous les groupes → `status = DISABLED` (révocation immédiate à la prochaine requête).
-- Émettre `user.role_demoted` quand le rôle redescend.
+**Base de données** — `_backend-reference/prisma/` (schema + 3 migrations dont `wave7_textract_async.sql`)
 
-### 4. Frontend
-- `cognitoProvider` : aucun changement de signature, mais s'assurer que le `accessToken` est rafraîchi proactivement à `exp - 60 s` (déjà fait via Amplify si activé) — sinon ajouter un retry-once sur 401 qui appelle `refreshSession` puis re-tente.
-- `KnowledgeBaseAdmin` : gating UI déjà aligné sur `SUPER_ADMIN`. Ajouter un **bandeau d'erreur** explicite si le backend renvoie 403 (`Vous n'avez pas le droit de publier`) au lieu d'un toast générique.
+**Automation** — `_backend-reference/scripts/deploy.sh` (deploy one-shot idempotent) + `.github/workflows/deploy-aws.yml` (CI)
 
-### 5. Infra Terraform
-- `infra/aws/main.tf` (Cognito) : OK, rien à toucher.
-- Ajouter `outputs.tf` :
-  - `cognito_user_pool_id`, `cognito_client_id`, `cognito_issuer_url` — pour les injecter automatiquement dans la task definition ECS via `ecs.tf`.
-- `ecs.tf` (task env) : ajouter `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID`, `ALLOW_LOCAL_AUTH=false` (prod) / `true` (dev preview).
-- Documenter dans `DEPLOYMENT_WAVE8.md` la procédure pour ajouter un user à un groupe (`aws cognito-idp admin-add-user-to-group`).
+**Documentation** — 8 docs deployment : `DEPLOYMENT.md` (runbook complet) + `DEPLOYMENT_WAVE1..8.md` + `BACKEND_AWS_AUDIT.md` + `FINAL_REPORT.md`
 
-### 6. Tests
-- `cognito-auth.test.ts` :
-  - Token valide groupe `SUPER_ADMIN` → role = SUPER_ADMIN.
-  - Token avec plusieurs groupes (`SUPER_ADMIN` + `MANAGER`) → SUPER_ADMIN (priorité).
-  - Token sans groupe → CONSULTANT par défaut.
-  - Token avec `client_id` faux → throw.
-  - Token expiré → throw.
-- `authMiddleware.test.ts` :
-  - Cognito branché + bearer Cognito → 200, `request.actor` typé.
-  - Cognito branché + bearer HMAC → 401 quand `ALLOW_LOCAL_AUTH=false`.
-  - Cognito non branché + bearer HMAC → 200.
-  - `requireRole("SUPER_ADMIN")` avec actor MANAGER → 403 + audit `ACCESS_DENIED`.
-- `app.test.ts` KB :
-  - `POST /admin/kb/upload` avec MANAGER → 403.
-  - `POST /admin/kb/documents/:id/publish` avec CONSULTANT → 403.
-  - `GET  /admin/kb/documents` avec AUDITOR → 200.
+**Frontend Lovable** — `src/mp/` (UI complète + `auth/cognitoProvider.ts` connectée à Cognito)
 
-### 7. Documentation
-- `DEPLOYMENT_WAVE8.md` :
-  - Variables d'env (`COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID`, `ALLOW_LOCAL_AUTH`).
-  - Comment créer un user + l'ajouter à un groupe en CLI.
-  - Tableau de matrice droits × rôle pour la KB.
-  - Procédure de révocation (retirer du groupe, attendre <60 s pour expiration access token, rotation refresh).
+✅ **Verdict** : rien ne manque côté code. Tout est versionné. Il reste uniquement les actions côté AWS (création de compte, secrets, DNS).
 
-## Estimation
-~1 j dev + 0,5 j tests/doc = **1,5 jour**.
+---
 
-## Hors scope
-- MFA WebAuthn / hardware key (Cognito supporte SMS+TOTP, déjà câblés via `mfa_configuration = OPTIONAL`).
-- SCIM provisioning depuis un IdP externe (SAML/OIDC fédéré).
-- Migration `cognito:groups` → tables `user_roles` Postgres : volontairement gardée en lecture seule depuis Cognito pour respecter la source de vérité unique.
+## 2. Plan de déploiement pas à pas
+
+### Étape 0 — Pré-requis sur ta machine
+1. Compte AWS actif + carte de crédit liée
+2. Installer : AWS CLI ≥ 2.15, Terraform ≥ 1.8, Docker (avec buildx), jq, Node.js 22
+3. Créer un user IAM `deployer` avec `AdministratorAccess` (à restreindre après), puis `aws configure --profile mp-deployer`
+
+### Étape 1 — Cloner le repo
+```bash
+git clone <ton-repo-github> mp-ai-assistant
+cd mp-ai-assistant/_backend-reference
+```
+
+### Étape 2 — Configurer Terraform (5 min)
+```bash
+cd infra/aws
+cp terraform.tfvars.example terraform.tfvars
+```
+Éditer `terraform.tfvars` : `aws_region` (ex. `eu-west-3`), `project_name`, `environment=prod`, `alarm_email`. Laisser `web_domain=""` au premier passage (CloudFront skippé tant qu'il n'y a pas de DNS).
+
+### Étape 3 — Déploiement initial (15-25 min)
+```bash
+export AWS_PROFILE=mp-deployer AWS_REGION=eu-west-3
+cd ..
+./scripts/deploy.sh
+```
+Ce script enchaîne automatiquement :
+1. `terraform apply` pass 1 → VPC, RDS, ECR, IAM, Cognito, S3, SQS, AOSS
+2. `docker buildx build --platform linux/amd64` + push des 3 images (api, web, worker) vers ECR
+3. `terraform apply` pass 2 avec les tags d'images réels → ECS Fargate démarre
+4. `prisma migrate deploy` via une tâche ECS one-shot
+
+À la fin, il affiche `ALB_URL` (URL HTTP de l'API).
+
+### Étape 4 — Bootstrap du premier admin (2 min)
+```bash
+POOL_ID=$(terraform -chdir=infra/aws output -raw cognito_user_pool_id)
+aws cognito-idp admin-create-user --user-pool-id $POOL_ID \
+  --username toi@migso-pcubed.com \
+  --user-attributes Name=email,Value=toi@migso-pcubed.com Name=email_verified,Value=true
+aws cognito-idp admin-add-user-to-group --user-pool-id $POOL_ID \
+  --username toi@migso-pcubed.com --group-name SUPER_ADMIN
+```
+Cognito envoie un mot de passe temporaire par email.
+
+### Étape 5 — Connecter le frontend Lovable au backend AWS
+Dans Lovable → Project Settings → Environment, ajouter :
+```
+VITE_API_URL=https://<ALB_URL>
+VITE_AUTH_MODE=cognito
+VITE_COGNITO_REGION=eu-west-3
+VITE_COGNITO_USER_POOL_ID=<output cognito_user_pool_id>
+VITE_COGNITO_CLIENT_ID=<output cognito_client_id>
+```
+Republier Lovable → l'UI tape directement le backend AWS.
+
+### Étape 6 — Tests de fumée
+1. Se connecter sur l'UI Lovable avec le compte admin → reset password forcé
+2. Upload d'un PDF dans Knowledge Base → vérifier passage `PROCESSING` → `PUBLISHED` (Textract async actif)
+3. Poser une question dans le chat → réponse + citations
+4. Vérifier dans CloudWatch : `/ecs/api`, `/ecs/worker`, `/ecs/migrate`
+
+### Étape 7 — DNS + HTTPS (optionnel mais recommandé)
+1. Créer ACM cert dans `us-east-1` (CloudFront) et dans ta région (ALB)
+2. Renseigner `web_domain`, `cloudfront_certificate_arn`, `acm_certificate_arn` dans `terraform.tfvars`
+3. Mettre à jour `web_allowed_origins`, `web_callback_urls`, `web_logout_urls`
+4. `./scripts/deploy.sh` → CloudFront + WAF s'activent
+5. Créer un CNAME chez ton registrar vers le domaine CloudFront
+
+### Étape 8 — CI/CD automatique
+Le workflow `.github/workflows/deploy-aws.yml` existe déjà. Ajouter dans GitHub → Settings → Secrets :
+- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (idéalement OIDC role) , `AWS_REGION`
+Chaque push sur `main` rebuild + redéploie automatiquement.
+
+---
+
+## 3. Coûts estimés mensuels (région Paris)
+
+| Poste | Dev (~) | Prod (~) |
+|---|---|---|
+| ECS Fargate (api+web+worker) | 60 € | 180 € |
+| RDS Postgres Multi-AZ db.t4g.medium | 110 € | 110 € |
+| OpenSearch Serverless (2 OCU min) | 180 € | 180 € |
+| ALB + CloudFront + WAF | 25 € | 40 € |
+| Bedrock (Claude/Titan) | usage | usage |
+| Textract + S3 + SQS + Cognito | 20 € | 40 € |
+| **Total infra fixe** | **~395 €** | **~550 €** |
+
+Budget AWS déjà câblé dans `aws-budgets.tf` → alerte email automatique.
+
+---
+
+## 4. Détails techniques
+
+- **Région par défaut** : `eu-west-3` (Paris) — RGPD compliant
+- **JWT Cognito** vérifié via JWKS distant + `client_id` + fallback HMAC désactivé en prod (`ALLOW_LOCAL_AUTH=false`)
+- **Ingestion** : SQS → worker → Textract async → SNS callback → chunking/embedding/AOSS → status `PUBLISHED`/`NEEDS_REVIEW`
+- **Backups** : snapshots RDS + S3 versioning + AOSS snapshot Lambda nocturne
+- **Sécurité** : VPC privé, NAT, VPC endpoints (S3/SQS/Secrets/ECR), WAF managed rules, KMS sur tous les volumes
+- **Limites connues** : `web_domain` doit être configuré pour activer CloudFront ; le state Terraform est local par défaut → passer S3+DynamoDB pour équipe
+
+---
+
+## Ce qui se passe quand tu valides ce plan
+
+Je passerai en mode build pour : (a) vérifier qu'aucun fichier critique n'a un import cassé avant ton premier `deploy.sh`, (b) éventuellement ajouter un script de smoke-test post-deploy, (c) compléter le runbook si tu veux que je détaille une étape précise (DNS, OIDC GitHub, restriction IAM…).
