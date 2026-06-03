@@ -43,9 +43,15 @@ variable "web_logout_urls" {
 }
 
 variable "web_domain" {
-  description = "Public domain for the web app (empty = use ALB DNS, skip CloudFront/WAF)"
+  description = "Public custom domain for the web app (empty = use *.cloudfront.net default cert)"
   type        = string
   default     = ""
+}
+
+variable "enable_cloudfront" {
+  description = "Provision CloudFront + WAF in front of the ALB. When true and web_domain is empty, the default *.cloudfront.net cert is used."
+  type        = bool
+  default     = true
 }
 
 variable "cloudfront_certificate_arn" {
