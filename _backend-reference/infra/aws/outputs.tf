@@ -52,7 +52,12 @@ output "alb_url" {
 }
 
 output "cloudfront_domain" {
-  value = var.web_domain == "" ? null : aws_cloudfront_distribution.web[0].domain_name
+  value = length(aws_cloudfront_distribution.web) > 0 ? aws_cloudfront_distribution.web[0].domain_name : null
+}
+
+output "app_url" {
+  description = "Public URL to access the deployed app"
+  value = length(aws_cloudfront_distribution.web) > 0 ? "https://${aws_cloudfront_distribution.web[0].domain_name}" : "http://${aws_lb.main.dns_name}"
 }
 
 output "ecr_repository_urls" {
