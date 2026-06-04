@@ -16,6 +16,7 @@ env:
   ENVIRONMENT: prod
   TF_VERSION: 1.9.8
   TF_IN_AUTOMATION: true
+  TF_INPUT: false
 
 permissions:
   contents: read
@@ -127,42 +128,49 @@ jobs:
           BUCKET="${PROJECT_NAME}-tfstate-${ACCOUNT_ID}"
           TABLE="${PROJECT_NAME}-tfstate-lock"
           LOCK_ID="${BUCKET}/${PROJECT_NAME}/terraform.tfstate"
-          ITEM=$(aws dynamodb get-item \
-            --table-name "$TABLE" \
-            --key "{\"LockID\":{\"S\":\"${LOCK_ID}\"}}" \
-            --output json 2>/dev/null || echo '{}')
-          INFO=$(echo "$ITEM" | jq -r '.Item.Info.S // empty')
-          if [[ -z "$INFO" ]]; then
-            echo "No active lock found."
-            exit 0
-          fi
-          echo "Found existing lock:"
-          echo "$INFO"
-          CREATED=$(echo "$INFO" | jq -r '.Created // empty')
-          if [[ -z "$CREATED" ]]; then
-            echo "Lock has no Created timestamp; deleting as stale."
-            aws dynamodb delete-item --table-name "$TABLE" \
-              --key "{\"LockID\":{\"S\":\"${LOCK_ID}\"}}"
-            exit 0
-          fi
-          LOCK_EPOCH=$(date -d "$CREATED" +%s)
-          NOW_EPOCH=$(date +%s)
-          AGE=$(( NOW_EPOCH - LOCK_EPOCH ))
-          echo "Lock age: ${AGE}s"
-          if (( AGE > 900 )); then
-            echo "Lock older than 15min — force-releasing (concurrency group guarantees no live run)."
-            aws dynamodb delete-item --table-name "$TABLE" \
-              --key "{\"LockID\":{\"S\":\"${LOCK_ID}\"}}"
-          else
-            echo "::error title=Active Terraform lock::A recent run (${AGE}s old) holds the lock. Wait or cancel it before retrying."
-            exit 1
-          fi
+          while true; do
+            ITEM=$(aws dynamodb get-item \
+              --table-name "$TABLE" \
+              --key "{\"LockID\":{\"S\":\"${LOCK_ID}\"}}" \
+              --output json 2>/dev/null || echo '{}')
+            INFO=$(echo "$ITEM" | jq -r '.Item.Info.S // empty')
+            if [[ -z "$INFO" ]]; then
+              echo "No active lock found."
+              exit 0
+            fi
+            echo "Found existing lock:"
+            echo "$INFO"
+            CREATED=$(echo "$INFO" | jq -r '.Created // empty')
+            if [[ -z "$CREATED" ]]; then
+              echo "Lock has no Created timestamp; deleting as stale."
+              aws dynamodb delete-item --table-name "$TABLE" \
+                --key "{\"LockID\":{\"S\":\"${LOCK_ID}\"}}"
+              exit 0
+            fi
+            LOCK_EPOCH=$(date -d "$CREATED" +%s)
+            NOW_EPOCH=$(date +%s)
+            AGE=$(( NOW_EPOCH - LOCK_EPOCH ))
+            echo "Lock age: ${AGE}s"
+            if (( AGE > 900 )); then
+              echo "Lock older than 15min — force-releasing."
+              aws dynamodb delete-item --table-name "$TABLE" \
+                --key "{\"LockID\":{\"S\":\"${LOCK_ID}\"}}"
+              exit 0
+            fi
+            WAIT=$(( 900 - AGE ))
+            if (( WAIT > 60 )); then WAIT=60; fi
+            echo "Recent lock still present; waiting ${WAIT}s before rechecking."
+            sleep "$WAIT"
+          done
 
       - name: Terraform Plan
         env:
           TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          TF_VAR_alarm_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
+          TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
         run: |
           terraform plan \
+            -input=false \
             -lock-timeout=10m \
             -var="api_image_tag=$TAG" \
             -var="web_image_tag=$TAG" \
@@ -170,7 +178,10 @@ jobs:
             -out=tfplan
 
       - name: Terraform Apply
-        run: terraform apply -lock-timeout=10m -auto-approve tfplan
+        env:
+          TF_VAR_alarm_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
+          TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
+        run: terraform apply -input=false -lock-timeout=10m -auto-approve tfplan
 
   # ---------------------------------------------------------------------------
   # 3. Force ECS to pull the new image (no-op if task-def already changed)
