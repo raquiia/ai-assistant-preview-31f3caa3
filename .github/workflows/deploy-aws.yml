@@ -1,8 +1,8 @@
 name: Deploy to AWS
 
 on:
-  push:
-    branches: [main]
+  # Manuel uniquement — aucun déclenchement automatique sur push.
+  # Pour lancer : Actions → Deploy to AWS → Run workflow.
   workflow_dispatch:
     inputs:
       apply_terraform:
@@ -224,7 +224,6 @@ jobs:
             -var="api_image_tag=$TAG" \
             -var="web_image_tag=$TAG" \
             -var="worker_image_tag=$TAG" \
-            -var="use_default_vpc=true" \
             -out=tfplan
 
       - name: Terraform Plan — human-readable summary (dry-run)
