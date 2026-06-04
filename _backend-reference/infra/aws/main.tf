@@ -34,7 +34,31 @@ resource "aws_kms_key" "secrets" {
   description             = "KMS key for MIGSO-PCUBED AI Assistant secrets and data encryption"
   deletion_window_in_days = 30
   enable_key_rotation     = true
-  tags                    = local.tags
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootPermissions"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowCloudWatchLogs"
+        Effect    = "Allow"
+        Principal = { Service = "logs.${var.aws_region}.amazonaws.com" }
+        Action    = ["kms:Encrypt", "kms:Decrypt", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:DescribeKey"]
+        Resource  = "*"
+        Condition = {
+          ArnLike = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:*"
+          }
+        }
+      }
+    ]
+  })
+  tags = local.tags
 }
 
 resource "aws_kms_alias" "secrets" {
@@ -49,6 +73,11 @@ resource "aws_kms_alias" "secrets" {
 resource "aws_s3_bucket" "knowledge" {
   bucket = "${local.name}-knowledge"
   tags   = local.tags
+
+  # Garde-fou anti-suppression accidentelle (bucket = données utilisateurs).
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_versioning" "knowledge" {
@@ -96,6 +125,9 @@ resource "aws_s3_bucket_lifecycle_configuration" "knowledge" {
   rule {
     id     = "expire-noncurrent-versions"
     status = "Enabled"
+    filter {
+      prefix = ""
+    }
     noncurrent_version_expiration {
       noncurrent_days = 90
     }
@@ -110,10 +142,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "knowledge" {
 # ---------------------------------------------------------------------------
 
 resource "aws_sqs_queue" "ingestion_dlq" {
-  name                       = "${local.name}-ingestion-dlq"
-  message_retention_seconds  = 1209600
-  kms_master_key_id          = aws_kms_key.secrets.arn
-  tags                       = local.tags
+  name                      = "${local.name}-ingestion-dlq"
+  message_retention_seconds = 1209600
+  kms_master_key_id         = aws_kms_key.secrets.arn
+  tags                      = local.tags
 }
 
 resource "aws_sqs_queue" "ingestion" {
@@ -229,14 +261,12 @@ resource "aws_secretsmanager_secret_version" "ai_provider_keys_placeholder" {
 resource "aws_cloudwatch_log_group" "api" {
   name              = "/ecs/${local.name}/api"
   retention_in_days = 90
-  kms_key_id        = aws_kms_key.secrets.arn
   tags              = local.tags
 }
 
 resource "aws_cloudwatch_log_group" "worker" {
   name              = "/ecs/${local.name}/worker"
   retention_in_days = 90
-  kms_key_id        = aws_kms_key.secrets.arn
   tags              = local.tags
 }
 
