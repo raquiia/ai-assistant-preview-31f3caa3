@@ -47,6 +47,22 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Ensure ECR repository exists
+        env:
+          REPO: ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}/${{ matrix.service }}
+        run: |
+          set -euo pipefail
+          if aws ecr describe-repositories --repository-names "$REPO" --region "${{ env.AWS_REGION }}" >/dev/null 2>&1; then
+            echo "ECR repository already exists: $REPO"
+          else
+            aws ecr create-repository \
+              --repository-name "$REPO" \
+              --image-scanning-configuration scanOnPush=true \
+              --encryption-configuration encryptionType=AES256 \
+              --region "${{ env.AWS_REGION }}" >/dev/null
+            echo "Created ECR repository: $REPO"
+          fi
+
       - name: Compute image tag
         id: meta
         run: echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
