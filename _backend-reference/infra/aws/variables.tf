@@ -141,12 +141,6 @@ variable "alarm_email" {
   default     = ""
 }
 
-variable "budget_alert_email" {
-  description = "Backward-compatible alias for budget alert email (empty = no subscription)"
-  type        = string
-  default     = ""
-}
-
 # ---- Optional features (toggle off when blocked by account policy) ----
 variable "enable_budgets" {
   description = "Create AWS Budgets. Disable if the account billing currency is not USD (Budgets only accepts USD)."
