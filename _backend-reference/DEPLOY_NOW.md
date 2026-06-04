@@ -4,7 +4,7 @@ Tout l'infra + frontend + backend + IA sur AWS, accessible via une URL HTTPS `ht
 
 | Paramètre | Valeur (déjà pré-configurée) |
 |---|---|
-| Compte AWS | `mp-dev` (sous-compte dédié) |
+| Compte AWS | `mp-devops` (sous-compte dédié) |
 | Région | `eu-west-3` (Paris) |
 | Repo GitHub | `raquiia/ai-assistant-preview-31f3caa3` |
 | Email admin / alertes | `louis.lepotvin@migso-pcubed.com` |
@@ -14,7 +14,7 @@ Tout l'infra + frontend + backend + IA sur AWS, accessible via une URL HTTPS `ht
 
 ## ✅ Pré-requis (à vérifier UNE fois)
 
-- [ ] Tu as un accès **SSO** au sous-compte `mp-dev`
+- [ ] Tu as un accès **SSO** au sous-compte `mp-devops`
 - [ ] Ton user SSO a la policy **`AdministratorAccess`** (le temps du bootstrap)
 - [ ] Le repo GitHub contient bien `_backend-reference/` ([vérifier ici](https://github.com/raquiia/ai-assistant-preview-31f3caa3/tree/main/_backend-reference))
 
@@ -22,7 +22,7 @@ Tout l'infra + frontend + backend + IA sur AWS, accessible via une URL HTTPS `ht
 
 ## 🎯 LA seule commande à lancer
 
-1. Ouvre la **Console AWS** → compte **mp-dev** via SSO
+1. Ouvre la **Console AWS** → compte **mp-devops** via SSO
 2. **Vérifie en haut à droite** : région = **Europe (Paris) eu-west-3**
 3. Clique sur l'icône **CloudShell** (`>_` à côté de la cloche)
 4. Attends 10-20 sec que le terminal soit prêt
@@ -72,7 +72,7 @@ Une fois les tests OK :
 - ❌ Pas besoin de publier le frontend Lovable
 - ❌ Pas besoin de configurer des `VITE_*` dans Lovable
 - ✅ Code = GitHub `raquiia/ai-assistant-preview-31f3caa3`
-- ✅ Infra + run = AWS sous-compte `mp-dev`
+- ✅ Infra + run = AWS sous-compte `mp-devops`
 - ✅ Frontend servi par CloudFront → ECS (conteneur nginx `apps/web/`)
 - ✅ Chaque `git push origin main` → redéploie auto via `.github/workflows/deploy-aws.yml`
   *(une config secrets GitHub OIDC suffit, voir `DEPLOYMENT.md`)*
@@ -96,7 +96,7 @@ Une fois les tests OK :
 
 | Symptôme | Action |
 |---|---|
-| `aws sts get-caller-identity` montre un autre compte | Mauvais profil SSO. Reconnecte-toi sur **mp-dev** |
+| `aws sts get-caller-identity` montre un autre compte | Mauvais profil SSO. Reconnecte-toi sur **mp-devops** |
 | `terraform apply` échoue sur quota (VPC/EIP/OCU AOSS) | Console → **Service Quotas** → demander l'augmentation. Copie-moi l'erreur. |
 | `deploy.sh` échoue sur push ECR | Relance la commande — tout est idempotent |
 | URL CloudFront répond 502/504 | ECS démarre encore. Attends 3-5 min puis recharge |
