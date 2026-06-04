@@ -2,7 +2,7 @@
 # ============================================================================
 # mpaibot — Bootstrap déploiement AWS depuis CloudShell
 # ============================================================================
-# Usage (dans AWS CloudShell, région eu-west-3, compte mp-dev) :
+# Usage (dans AWS CloudShell, région eu-west-3, compte mp-devops) :
 #
 #   curl -sLO https://raw.githubusercontent.com/raquiia/ai-assistant-preview-31f3caa3/main/_backend-reference/scripts/bootstrap-cloudshell.sh
 #   bash bootstrap-cloudshell.sh
@@ -35,7 +35,7 @@ echo "Compte AWS : $ACCOUNT_ID"
 echo "Identité   : $ACCOUNT_ARN"
 echo "Région     : $AWS_REGION"
 echo ""
-read -p "✋ Confirme que c'est bien le compte mp-dev (ENTRÉE = continuer, Ctrl+C = annuler) " _
+read -p "✋ Confirme que c'est bien le compte mp-devops (ENTRÉE = continuer, Ctrl+C = annuler) " _
 
 # ============================================================================
 # ÉTAPE 2 — Installation de Terraform
