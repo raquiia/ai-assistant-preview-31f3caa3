@@ -15,6 +15,7 @@ env:
   PROJECT_NAME: migso-pcubed
   ENVIRONMENT: prod
   TF_VERSION: 1.9.8
+  TF_IN_AUTOMATION: true
 
 permissions:
   contents: read
@@ -118,6 +119,25 @@ jobs:
           terraform init \
             -backend-config="bucket=${PROJECT_NAME}-tfstate-${ACCOUNT_ID}" \
             -backend-config="dynamodb_table=${PROJECT_NAME}-tfstate-lock"
+
+      - name: Check Terraform state lock
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET="${PROJECT_NAME}-tfstate-${ACCOUNT_ID}"
+          TABLE="${PROJECT_NAME}-tfstate-lock"
+          LOCK_ID="${BUCKET}/${PROJECT_NAME}/terraform.tfstate"
+          LOCK_INFO=$(aws dynamodb get-item \
+            --table-name "$TABLE" \
+            --key "{\"LockID\":{\"S\":\"${LOCK_ID}\"}}" \
+            --projection-expression "Info" \
+            --query "Item.Info.S" \
+            --output text 2>/dev/null || true)
+          if [[ -n "$LOCK_INFO" && "$LOCK_INFO" != "None" ]]; then
+            echo "::error title=Terraform state is locked::Cancel older AWS deploy runs. If no run is active, this is a stale lock and must be force-unlocked with the ID shown below."
+            echo "$LOCK_INFO"
+            exit 1
+          fi
 
       - name: Terraform Plan
         env:
