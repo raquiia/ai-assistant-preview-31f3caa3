@@ -125,9 +125,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "knowledge" {
   rule {
     id     = "expire-noncurrent-versions"
     status = "Enabled"
-    filter {
-      prefix = ""
-    }
+    filter {}
     noncurrent_version_expiration {
       noncurrent_days = 90
     }
