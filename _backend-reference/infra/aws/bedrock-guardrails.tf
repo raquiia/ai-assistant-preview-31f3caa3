@@ -64,7 +64,7 @@ resource "aws_bedrock_guardrail" "main" {
     }
   }
 
-  tags = var.common_tags
+  tags = local.tags
 }
 
 output "bedrock_guardrail_id" {

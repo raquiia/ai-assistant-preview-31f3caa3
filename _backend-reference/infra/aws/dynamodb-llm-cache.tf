@@ -5,7 +5,7 @@
 # encryption with the project-managed CMK.
 
 resource "aws_dynamodb_table" "llm_cache" {
-  name         = "${var.project}-llm-cache"
+  name         = "${local.name}-llm-cache"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "cacheKey"
 
@@ -25,11 +25,11 @@ resource "aws_dynamodb_table" "llm_cache" {
 
   server_side_encryption {
     enabled     = true
-    kms_key_arn = aws_kms_key.main.arn
+    kms_key_arn = aws_kms_key.secrets.arn
   }
 
-  tags = merge(local.common_tags, {
-    Name      = "${var.project}-llm-cache"
+  tags = merge(local.tags, {
+    Name      = "${local.name}-llm-cache"
     Component = "llm-cache"
   })
 }
@@ -51,12 +51,12 @@ data "aws_iam_policy_document" "llm_cache_rw" {
 }
 
 resource "aws_iam_policy" "llm_cache_rw" {
-  name   = "${var.project}-llm-cache-rw"
+  name   = "${local.name}-llm-cache-rw"
   policy = data.aws_iam_policy_document.llm_cache_rw.json
 }
 
 resource "aws_iam_role_policy_attachment" "api_llm_cache_rw" {
-  role       = aws_iam_role.api_task.name
+  role       = aws_iam_role.task_role_api.name
   policy_arn = aws_iam_policy.llm_cache_rw.arn
 }
 

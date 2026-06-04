@@ -10,21 +10,21 @@
 
 # ----- SNS topic Textract publishes job completion events to ----------------
 resource "aws_sns_topic" "textract_callback" {
-  name              = "${var.project}-textract-callback"
+  name              = "${local.name}-textract-callback"
   kms_master_key_id = "alias/aws/sns"
-  tags              = local.common_tags
+  tags              = local.tags
 }
 
 # ----- SQS callback queue (with DLQ) ----------------------------------------
 resource "aws_sqs_queue" "ingestion_callback_dlq" {
-  name                       = "${var.project}-ingestion-callback-dlq"
+  name                       = "${local.name}-ingestion-callback-dlq"
   message_retention_seconds  = 1209600 # 14 days
   kms_master_key_id          = "alias/aws/sqs"
-  tags                       = local.common_tags
+  tags                       = local.tags
 }
 
 resource "aws_sqs_queue" "ingestion_callback" {
-  name                       = "${var.project}-ingestion-callback"
+  name                       = "${local.name}-ingestion-callback"
   visibility_timeout_seconds = 900
   message_retention_seconds  = 345600 # 4 days
   kms_master_key_id          = "alias/aws/sqs"
@@ -34,7 +34,7 @@ resource "aws_sqs_queue" "ingestion_callback" {
     maxReceiveCount     = 5
   })
 
-  tags = local.common_tags
+  tags = local.tags
 }
 
 # Allow SNS to deliver into the queue.
@@ -79,9 +79,9 @@ data "aws_iam_policy_document" "textract_assume" {
 }
 
 resource "aws_iam_role" "textract_service" {
-  name               = "${var.project}-textract-service"
+  name               = "${local.name}-textract-service"
   assume_role_policy = data.aws_iam_policy_document.textract_assume.json
-  tags               = local.common_tags
+  tags               = local.tags
 }
 
 data "aws_iam_policy_document" "textract_publish" {
@@ -92,7 +92,7 @@ data "aws_iam_policy_document" "textract_publish" {
 }
 
 resource "aws_iam_role_policy" "textract_publish" {
-  name   = "${var.project}-textract-publish"
+  name   = "${local.name}-textract-publish"
   role   = aws_iam_role.textract_service.id
   policy = data.aws_iam_policy_document.textract_publish.json
 }
@@ -140,8 +140,8 @@ data "aws_iam_policy_document" "worker_textract" {
 resource "aws_iam_role_policy" "worker_textract" {
   # The worker task role is created in ecs.tf — referenced by name here so
   # this file can be applied independently.
-  name   = "${var.project}-worker-textract"
-  role   = aws_iam_role.ecs_worker_task.id
+  name   = "${local.name}-worker-textract"
+  role   = aws_iam_role.task_role_worker.id
   policy = data.aws_iam_policy_document.worker_textract.json
 }
 
