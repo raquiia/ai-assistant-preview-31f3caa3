@@ -9,6 +9,14 @@ on:
         description: "Run terraform apply (infra changes)"
         type: boolean
         default: false
+      cleanup_before_apply:
+        description: "Run terraform destroy first to clean partial infrastructure"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Dry-run: only show terraform plan (no apply, no destroy, no cleanup)"
+        type: boolean
+        default: false
 
 env:
   AWS_REGION: eu-west-3
@@ -163,6 +171,47 @@ jobs:
             sleep "$WAIT"
           done
 
+      - name: Cleanup partial Terraform infrastructure
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.cleanup_before_apply && !inputs.dry_run }}
+        env:
+          TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          TF_VAR_alarm_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
+          TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
+        run: |
+          set -euo pipefail
+          if terraform state list >/tmp/tfstate-resources.txt 2>/dev/null && [[ -s /tmp/tfstate-resources.txt ]]; then
+            echo "Cleaning existing Terraform-managed resources before retry..."
+            terraform destroy \
+              -input=false \
+              -lock-timeout=10m \
+              -auto-approve \
+              -var="api_image_tag=$TAG" \
+              -var="web_image_tag=$TAG" \
+              -var="worker_image_tag=$TAG" \
+              -var="rds_deletion_protection=false"
+          else
+            echo "Terraform state is empty; nothing to clean."
+          fi
+
+      - name: Cleanup orphan AWS resources (out of state)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.cleanup_before_apply && !inputs.dry_run }}
+        run: |
+          set +e
+          echo "Deleting orphan CloudWatch log groups from previous runs..."
+          for LG in /ecs/migso-pcubed-dev/api /ecs/migso-pcubed-dev/worker /ecs/migso-pcubed-prod/api /ecs/migso-pcubed-prod/worker; do
+            aws logs delete-log-group --log-group-name "$LG" --region "$AWS_REGION" 2>/dev/null \
+              && echo "  deleted $LG" || echo "  skip $LG (absent)"
+          done
+          echo "Checking for orphan Bedrock guardrail 'mp-guardrail'..."
+          GID=$(aws bedrock list-guardrails --region "$AWS_REGION" --query "guardrails[?name=='mp-guardrail'].id" --output text 2>/dev/null)
+          if [[ -n "$GID" && "$GID" != "None" ]]; then
+            aws bedrock delete-guardrail --guardrail-identifier "$GID" --region "$AWS_REGION" \
+              && echo "  deleted guardrail $GID" || echo "  failed to delete guardrail $GID"
+          else
+            echo "  no orphan guardrail"
+          fi
+          exit 0
+
       - name: Terraform Plan
         env:
           TAG: ${{ needs.build-and-push.outputs.image_tag }}
@@ -175,9 +224,60 @@ jobs:
             -var="api_image_tag=$TAG" \
             -var="web_image_tag=$TAG" \
             -var="worker_image_tag=$TAG" \
+            -var="use_default_vpc=true" \
             -out=tfplan
 
+      - name: Terraform Plan — human-readable summary (dry-run)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          echo "============================================================"
+          echo "  DRY-RUN — no apply, no destroy, no cleanup will be done"
+          echo "============================================================"
+          echo ""
+          echo "▶ Full plan (text):"
+          terraform show -no-color tfplan
+          echo ""
+          echo "▶ Resource change summary:"
+          terraform show -json tfplan > /tmp/tfplan.json
+          python3 - <<'PY'
+          import json, collections
+          with open('/tmp/tfplan.json') as f:
+              plan = json.load(f)
+          changes = plan.get('resource_changes', [])
+          buckets = collections.defaultdict(list)
+          for rc in changes:
+              actions = tuple(rc.get('change', {}).get('actions', []))
+              if actions == ('no-op',):
+                  continue
+              if actions == ('create',):           key = 'CREATE'
+              elif actions == ('update',):         key = 'UPDATE'
+              elif actions == ('delete',):         key = 'DELETE'
+              elif actions == ('delete','create'): key = 'REPLACE'
+              elif actions == ('create','delete'): key = 'REPLACE'
+              else:                                key = '/'.join(actions).upper()
+              buckets[key].append(f"  - {rc['address']}  ({rc['type']})")
+          if not buckets:
+              print("No changes. Infrastructure matches configuration.")
+          else:
+              for kind in ('CREATE','UPDATE','REPLACE','DELETE'):
+                  if kind in buckets:
+                      print(f"\n=== {kind}  ({len(buckets[kind])}) ===")
+                      print('\n'.join(buckets[kind]))
+              for kind, items in buckets.items():
+                  if kind not in ('CREATE','UPDATE','REPLACE','DELETE'):
+                      print(f"\n=== {kind}  ({len(items)}) ===")
+                      print('\n'.join(items))
+              total = sum(len(v) for v in buckets.values())
+              print(f"\nTOTAL changes: {total}")
+          PY
+          echo ""
+          echo "============================================================"
+          echo "  End of dry-run. Re-run the workflow WITHOUT 'dry_run' to apply."
+          echo "============================================================"
+
       - name: Terraform Apply
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
         env:
           TF_VAR_alarm_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
           TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
@@ -189,6 +289,7 @@ jobs:
   ecs-deploy:
     name: ECS Rolling Update
     needs: terraform
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
