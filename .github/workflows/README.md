@@ -2,81 +2,86 @@
 
 Workflow : `.github/workflows/deploy-aws.yml`
 
-Pipeline : `terraform apply (infra)` → `docker build/push ECR` (api + web + worker en parallèle) → `terraform apply (rollout ECS)` → `prisma migrate deploy` (ECS run-task) → `summary`.
+## 🔑 Secrets GitHub à configurer (une seule fois)
 
-## Prérequis (one-shot)
-
-### 1. Rôle IAM OIDC pour GitHub Actions
-
-Crée un rôle IAM dans AWS qui fait confiance au provider OIDC GitHub :
-
-```bash
-# Provider OIDC (si pas déjà créé)
-aws iam create-open-id-connect-provider \
-  --url https://token.actions.githubusercontent.com \
-  --client-id-list sts.amazonaws.com \
-  --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1
-```
-
-Trust policy (remplace `OWNER/REPO`) :
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Principal": { "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com" },
-    "Action": "sts:AssumeRoleWithWebIdentity",
-    "Condition": {
-      "StringEquals": { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
-      "StringLike":   { "token.actions.githubusercontent.com:sub": "repo:OWNER/REPO:ref:refs/heads/main" }
-    }
-  }]
-}
-```
-
-Attache au rôle les politiques nécessaires (a minima : `AdministratorAccess` pour la phase bootstrap, à durcir ensuite : `AmazonEC2ContainerRegistryPowerUser`, accès Terraform sur VPC/RDS/ECS/IAM/Secrets/AOSS/CloudFront/WAF).
-
-### 2. Secrets GitHub
-
-Dans **Settings → Secrets and variables → Actions** :
+Dans ton repo GitHub → **Settings → Secrets and variables → Actions → New repository secret** :
 
 | Nom | Valeur |
-|-----|--------|
-| `AWS_DEPLOY_ROLE_ARN` | ARN du rôle créé ci-dessus |
-| `TERRAFORM_TFVARS` *(optionnel)* | Contenu complet du fichier `terraform.tfvars`. Si absent, le workflow copie `terraform.tfvars.example`. |
+|---|---|
+| `AWS_ACCESS_KEY_ID` | Access key d'un utilisateur IAM avec droits de déploiement |
+| `AWS_SECRET_ACCESS_KEY` | Secret key correspondante |
 
-### 3. Variables GitHub (optionnel)
+**Création de l'utilisateur IAM** (depuis la console AWS) :
+1. IAM → Users → Create user → `github-actions-deploy`
+2. Attach policies : `AdministratorAccess` (pour le bootstrap) ou plus restreint si tu veux durcir
+3. Security credentials → Create access key → "Application running outside AWS" → copie les 2 valeurs
 
-| Nom | Défaut | Rôle |
-|-----|--------|------|
-| `AWS_REGION` | `eu-west-3` | Région cible |
+## 🚀 Premier déploiement (ordre obligatoire)
 
-### 4. Environnement protégé (pour `destroy`)
+### Étape A — Bootstrap manuel via AWS CloudShell (UNE FOIS)
+Le workflow GitHub Actions a besoin que l'infra de base (ECR, ECS cluster) existe déjà. Premier `terraform apply` dans CloudShell :
 
-Crée l'environnement **`production-destroy`** (Settings → Environments) avec **Required reviewers**, pour qu'un `terraform destroy` exige une approbation manuelle.
+```bash
+# Dans AWS CloudShell (console AWS → icône terminal)
+cd ~
+curl -sLO https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip
+unzip -o terraform_1.9.8_linux_amd64.zip && mkdir -p ~/bin && mv terraform ~/bin/
+export PATH=$HOME/bin:$PATH
 
-## Utilisation
+git clone https://github.com/<TON_USER>/mpaibot-v2.git
+cd mpaibot-v2/_backend-reference/infra/aws
+cp terraform.tfvars.example terraform.tfvars
+# Édite terraform.tfvars : environment="prod", emails, domaines…
+nano terraform.tfvars
 
-- **Push sur `main`** touchant `_backend-reference/**` → déploiement automatique.
-- **Déclenchement manuel** (onglet Actions → *Deploy AWS Backend* → *Run workflow*) :
-  - `action=plan` — `terraform plan` uniquement
-  - `action=deploy` — pipeline complet
-  - `action=destroy` — tear-down (approbation requise)
-  - `skip_migrate=true` — saute Prisma
+terraform init
+terraform apply   # ~15-20 min
+```
 
-## Backend Terraform distant (recommandé)
+### Étape B — Backend Terraform distant (RECOMMANDÉ)
+Pour que GitHub Actions partage le même state que ton CloudShell, configure un backend S3 :
 
-Le workflow utilise par défaut un state local — non partageable entre runs. Pour un usage CI, configure un backend S3 + DynamoDB dans `_backend-reference/infra/aws/main.tf` :
+```bash
+# Toujours dans CloudShell, crée le bucket + table DynamoDB
+aws s3api create-bucket --bucket migso-pcubed-tfstate \
+  --region eu-west-3 --create-bucket-configuration LocationConstraint=eu-west-3
+aws s3api put-bucket-versioning --bucket migso-pcubed-tfstate \
+  --versioning-configuration Status=Enabled
+aws dynamodb create-table --table-name terraform-locks \
+  --attribute-definitions AttributeName=LockID,AttributeType=S \
+  --key-schema AttributeName=LockID,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST --region eu-west-3
+```
+
+Puis ajoute dans `_backend-reference/infra/aws/main.tf` (au début, dans le bloc `terraform {}`) :
 
 ```hcl
-terraform {
-  backend "s3" {
-    bucket         = "migso-tfstate"
-    key            = "ai-assistant/dev/terraform.tfstate"
-    region         = "eu-west-3"
-    dynamodb_table = "migso-tflock"
-    encrypt        = true
-  }
+backend "s3" {
+  bucket         = "migso-pcubed-tfstate"
+  key            = "prod/terraform.tfstate"
+  region         = "eu-west-3"
+  dynamodb_table = "terraform-locks"
+  encrypt        = true
 }
 ```
+
+Puis `terraform init -migrate-state` pour migrer le state local vers S3.
+
+### Étape C — Push du code → déploiement auto
+```bash
+# Depuis CloudShell ou github.dev
+git add . && git commit -m "Add CI/CD" && git push
+```
+
+Va dans l'onglet **Actions** de ton repo : tu verras le workflow tourner.
+
+## 📦 Ce que fait le workflow à chaque push sur `main`
+
+1. **build-and-push** (parallèle) : build des 3 images Docker (api/web/worker) → push vers ECR avec tag `<sha-court>` et `latest`
+2. **terraform** : `terraform apply` avec les nouveaux tags d'images
+3. **ecs-deploy** : force ECS à pull les nouvelles images (rolling update zero-downtime)
+
+Temps total : **3-5 min** par déploiement.
+
+## 🔄 Déclencher manuellement
+Actions → "Deploy to AWS" → **Run workflow** → branche `main` → Run.
