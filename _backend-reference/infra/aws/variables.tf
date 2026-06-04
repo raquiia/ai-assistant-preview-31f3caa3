@@ -140,3 +140,22 @@ variable "alarm_email" {
   type        = string
   default     = ""
 }
+
+variable "budget_alert_email" {
+  description = "Backward-compatible alias for budget alert email (empty = no subscription)"
+  type        = string
+  default     = ""
+}
+
+# ---- Optional features (toggle off when blocked by account policy) ----
+variable "enable_budgets" {
+  description = "Create AWS Budgets. Disable if the account billing currency is not USD (Budgets only accepts USD)."
+  type        = bool
+  default     = false
+}
+
+variable "enable_bedrock_guardrail" {
+  description = "Create the Bedrock guardrail. Disable when one already exists in the account."
+  type        = bool
+  default     = false
+}
