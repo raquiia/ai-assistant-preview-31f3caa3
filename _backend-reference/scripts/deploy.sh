@@ -20,11 +20,20 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing $1"; exit 1; }; }
 need aws; need terraform; need docker; need jq
 
 : "${AWS_REGION:=eu-west-3}"
-: "${AWS_PROFILE:=default}"
-export AWS_REGION AWS_PROFILE
+export AWS_REGION
+# AWS_PROFILE: only export if explicitly set by the caller. In CloudShell or
+# any environment using an instance/role/SSO session, no profile is needed —
+# credentials come from the ambient identity. Forcing AWS_PROFILE=default
+# breaks the CLI with "The config profile (default) could not be found".
+if [[ -n "${AWS_PROFILE:-}" ]]; then
+  export AWS_PROFILE
+  PROFILE_INFO="profile=${AWS_PROFILE}"
+else
+  PROFILE_INFO="ambient credentials"
+fi
 
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-echo "→ Using AWS account ${ACCOUNT_ID} in ${AWS_REGION} (profile=${AWS_PROFILE})"
+echo "→ Using AWS account ${ACCOUNT_ID} in ${AWS_REGION} (${PROFILE_INFO})"
 
 if [[ ! -f "$INFRA_DIR/terraform.tfvars" ]]; then
   echo "→ Copying terraform.tfvars.example → terraform.tfvars (edit before re-running)"
