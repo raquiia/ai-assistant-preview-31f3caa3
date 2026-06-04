@@ -105,6 +105,10 @@ jobs:
     name: Terraform Apply
     needs: build-and-push
     runs-on: ubuntu-latest
+    env:
+      # Force réutilisation du VPC par défaut du compte (quota VPC atteint).
+      # Empêche aws_vpc.main / subnets / NAT / IGW / VPC endpoints d'être créés.
+      TF_VAR_use_default_vpc: "true"
     defaults:
       run:
         working-directory: _backend-reference/infra/aws
