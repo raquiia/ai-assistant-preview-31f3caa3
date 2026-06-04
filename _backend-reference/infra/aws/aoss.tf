@@ -37,8 +37,8 @@ resource "aws_opensearchserverless_security_policy" "network" {
 
 resource "aws_opensearchserverless_vpc_endpoint" "main" {
   name               = "${local.name}-vec-vpce"
-  vpc_id             = aws_vpc.main.id
-  subnet_ids         = aws_subnet.private[*].id
+  vpc_id             = local.vpc_id
+  subnet_ids         = local.private_subnet_ids
   security_group_ids = [aws_security_group.aoss.id]
 }
 
