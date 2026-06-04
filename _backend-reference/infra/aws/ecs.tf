@@ -17,7 +17,7 @@ resource "aws_lb" "main" {
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
-  subnets            = aws_subnet.public[*].id
+  subnets            = local.public_subnet_ids
   idle_timeout       = 60
   tags               = local.tags
 }
@@ -27,7 +27,7 @@ resource "aws_lb_target_group" "api" {
   port        = 4000
   protocol    = "HTTP"
   target_type = "ip"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = local.vpc_id
 
   health_check {
     path                = "/health"
@@ -44,7 +44,7 @@ resource "aws_lb_target_group" "web" {
   port        = 8080
   protocol    = "HTTP"
   target_type = "ip"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = local.vpc_id
 
   health_check {
     path                = "/"
@@ -135,12 +135,12 @@ resource "aws_ecs_task_definition" "api" {
   task_role_arn            = aws_iam_role.task_role_api.arn
 
   container_definitions = jsonencode([{
-    name      = "api"
-    image     = "${aws_ecr_repository.service["api"].repository_url}:${var.api_image_tag}"
-    essential = true
+    name         = "api"
+    image        = "${aws_ecr_repository.service["api"].repository_url}:${var.api_image_tag}"
+    essential    = true
     portMappings = [{ containerPort = 4000, hostPort = 4000, protocol = "tcp" }]
-    environment = local.common_env
-    secrets     = local.common_secrets
+    environment  = local.common_env
+    secrets      = local.common_secrets
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -171,9 +171,9 @@ resource "aws_ecs_task_definition" "web" {
   task_role_arn            = aws_iam_role.task_role_api.arn
 
   container_definitions = jsonencode([{
-    name      = "web"
-    image     = "${aws_ecr_repository.service["web"].repository_url}:${var.web_image_tag}"
-    essential = true
+    name         = "web"
+    image        = "${aws_ecr_repository.service["web"].repository_url}:${var.web_image_tag}"
+    essential    = true
     portMappings = [{ containerPort = 8080, hostPort = 8080, protocol = "tcp" }]
     environment = [
       { name = "VITE_API_URL", value = "" },
@@ -201,9 +201,9 @@ resource "aws_ecs_task_definition" "worker" {
   task_role_arn            = aws_iam_role.task_role_worker.arn
 
   container_definitions = jsonencode([{
-    name      = "worker"
-    image     = "${aws_ecr_repository.service["worker"].repository_url}:${var.worker_image_tag}"
-    essential = true
+    name        = "worker"
+    image       = "${aws_ecr_repository.service["worker"].repository_url}:${var.worker_image_tag}"
+    essential   = true
     environment = local.common_env
     secrets     = local.common_secrets
     logConfiguration = {
@@ -229,9 +229,9 @@ resource "aws_ecs_service" "api" {
   health_check_grace_period_seconds = 60
 
   network_configuration {
-    subnets          = aws_subnet.private[*].id
+    subnets          = local.private_subnet_ids
     security_groups  = [aws_security_group.ecs_api.id]
-    assign_public_ip = false
+    assign_public_ip = var.use_default_vpc
   }
 
   load_balancer {
@@ -258,9 +258,9 @@ resource "aws_ecs_service" "web" {
   health_check_grace_period_seconds = 30
 
   network_configuration {
-    subnets          = aws_subnet.private[*].id
+    subnets          = local.private_subnet_ids
     security_groups  = [aws_security_group.ecs_api.id]
-    assign_public_ip = false
+    assign_public_ip = var.use_default_vpc
   }
 
   load_balancer {
@@ -286,9 +286,9 @@ resource "aws_ecs_service" "worker" {
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets          = aws_subnet.private[*].id
+    subnets          = local.private_subnet_ids
     security_groups  = [aws_security_group.ecs_worker.id]
-    assign_public_ip = false
+    assign_public_ip = var.use_default_vpc
   }
 
   deployment_circuit_breaker {
