@@ -20,6 +20,10 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: deploy-aws-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   # ---------------------------------------------------------------------------
   # 1. Build & push Docker images to ECR
@@ -120,13 +124,14 @@ jobs:
           TAG: ${{ needs.build-and-push.outputs.image_tag }}
         run: |
           terraform plan \
+            -lock-timeout=10m \
             -var="api_image_tag=$TAG" \
             -var="web_image_tag=$TAG" \
             -var="worker_image_tag=$TAG" \
             -out=tfplan
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply -lock-timeout=10m -auto-approve tfplan
 
   # ---------------------------------------------------------------------------
   # 3. Force ECS to pull the new image (no-op if task-def already changed)
