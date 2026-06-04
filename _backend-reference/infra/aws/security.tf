@@ -5,7 +5,7 @@
 resource "aws_security_group" "alb" {
   name        = "${local.name}-alb"
   description = "Public ALB"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = local.vpc_id
 
   ingress {
     description = "HTTPS from the world"
@@ -33,7 +33,7 @@ resource "aws_security_group" "alb" {
 resource "aws_security_group" "ecs_api" {
   name        = "${local.name}-ecs-api"
   description = "ECS API tasks"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = local.vpc_id
 
   ingress {
     description     = "ALB to api"
@@ -61,7 +61,7 @@ resource "aws_security_group" "ecs_api" {
 resource "aws_security_group" "ecs_worker" {
   name        = "${local.name}-ecs-worker"
   description = "ECS worker tasks (no ingress)"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = local.vpc_id
 
   egress {
     from_port   = 0
@@ -75,7 +75,7 @@ resource "aws_security_group" "ecs_worker" {
 resource "aws_security_group" "rds" {
   name        = "${local.name}-rds"
   description = "Postgres — accessible from ECS only"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = local.vpc_id
 
   ingress {
     description     = "Postgres from api"
@@ -96,7 +96,7 @@ resource "aws_security_group" "rds" {
 resource "aws_security_group" "aoss" {
   name        = "${local.name}-aoss"
   description = "AOSS — accessible from ECS"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = local.vpc_id
 
   ingress {
     description     = "HTTPS from api/worker"
@@ -117,14 +117,14 @@ resource "aws_security_group" "aoss" {
 resource "aws_security_group" "vpce" {
   name        = "${local.name}-vpce"
   description = "VPC endpoints"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = local.vpc_id
 
   ingress {
     description = "HTTPS from VPC"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = [aws_vpc.main.cidr_block]
+    cidr_blocks = [local.vpc_cidr_block]
   }
   egress {
     from_port   = 0
